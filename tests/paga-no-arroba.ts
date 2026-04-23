@@ -1,10 +1,12 @@
 import * as anchor from "@coral-xyz/anchor";
-import { Program, BN } from "@coral-xyz/anchor";
+import { Program } from "@coral-xyz/anchor";
+import BN from "bn.js";
 import {
   Keypair,
   PublicKey,
   SystemProgram,
   LAMPORTS_PER_SOL,
+  Transaction,
 } from "@solana/web3.js";
 import { assert } from "chai";
 import * as crypto from "crypto";
@@ -19,73 +21,83 @@ function handleHashBytes(handle: string): number[] {
   return Array.from(hashHandle(handle));
 }
 
-const PLATFORM_INSTAGRAM = 0;
-const PLATFORM_TWITTER = 1;
-const PLATFORM_WHATSAPP = 2;
+/** Deterministic keypair from a string seed (consistent across runs). */
+function makeKeypair(seed: string): Keypair {
+  const hash = crypto.createHash("sha256").update(seed).digest();
+  return Keypair.fromSeed(hash.slice(0, 32));
+}
 
-async function airdrop(
+/** Transfer SOL from provider wallet — no faucet rate limits. */
+async function fund(
   provider: anchor.AnchorProvider,
   pubkey: PublicKey,
   sol: number
 ) {
-  const sig = await provider.connection.requestAirdrop(
-    pubkey,
-    sol * LAMPORTS_PER_SOL
+  const tx = new Transaction().add(
+    SystemProgram.transfer({
+      fromPubkey: provider.wallet.publicKey,
+      toPubkey: pubkey,
+      lamports: Math.round(sol * LAMPORTS_PER_SOL),
+    })
   );
-  await provider.connection.confirmTransaction(sig, "confirmed");
+  await provider.sendAndConfirm(tx);
 }
 
-// ── Tests ──────────────────────────────────────────────────────────────────────
+const PLATFORM_INSTAGRAM = 0;
+const PLATFORM_TWITTER = 1;
+
+// ── Registry tests ─────────────────────────────────────────────────────────────
 
 describe("paga-no-arroba: Registry", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
   const registryProgram = anchor.workspace.Registry as Program<any>;
-  const vaultProgram = anchor.workspace.Vault as Program<any>;
-
   const authority = provider.wallet as anchor.Wallet;
-  const alice = Keypair.generate();
-  const bob = Keypair.generate();
+
+  // Deterministic keypairs — same pubkeys across every test run
+  const alice = makeKeypair("pay-on-handle-test-alice-v1");
+  const bob = makeKeypair("pay-on-handle-test-bob-v1");
 
   const [configPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("config")],
     registryProgram.programId
   );
 
-  const testHandle = "@joao_silva";
+  // Per-run unique handle so we always get a fresh handle_record
+  const runTag = Date.now().toString(36);
+  const testHandle = `@joao${runTag}`;
   const testHash = handleHashBytes(testHandle);
 
   function handleRecordPda(platform: number, hash: number[]): PublicKey {
     const [pda] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("handle"),
-        Buffer.from([platform]),
-        Buffer.from(hash),
-      ],
+      [Buffer.from("handle"), Buffer.from([platform]), Buffer.from(hash)],
       registryProgram.programId
     );
     return pda;
   }
 
   before(async () => {
-    await airdrop(provider, alice.publicKey, 5);
-    await airdrop(provider, bob.publicKey, 5);
+    await fund(provider, alice.publicKey, 0.02);
+    await fund(provider, bob.publicKey, 0.02);
   });
 
   it("initialize registry config", async () => {
-    await registryProgram.methods
-      .initializeConfig(Keypair.generate().publicKey)
-      .accounts({
-        config: configPda,
-        authority: authority.publicKey,
-        systemProgram: SystemProgram.programId,
-      })
-      .rpc();
+    try {
+      await registryProgram.methods
+        .initializeConfig(Keypair.generate().publicKey)
+        .accounts({
+          config: configPda,
+          authority: authority.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+    } catch (e: any) {
+      if (!e.message.includes("already in use")) throw e;
+    }
 
     const config = await registryProgram.account.registryConfig.fetch(configPda);
     assert.equal(config.authority.toBase58(), authority.publicKey.toBase58());
-    assert.equal(config.totalHandles.toNumber(), 0);
   });
 
   it("register a handle with valid proof", async () => {
@@ -116,16 +128,14 @@ describe("paga-no-arroba: Registry", () => {
   });
 
   it("rejects register with empty proof", async () => {
-    const recordPda = handleRecordPda(
-      PLATFORM_TWITTER,
-      handleHashBytes("@another")
-    );
+    const otherHash = handleHashBytes(`@other${runTag}`);
+    const recordPda = handleRecordPda(PLATFORM_TWITTER, otherHash);
 
     try {
       await registryProgram.methods
         .registerHandle(
           PLATFORM_TWITTER,
-          handleHashBytes("@another"),
+          otherHash,
           bob.publicKey,
           Buffer.from("")
         )
@@ -144,7 +154,7 @@ describe("paga-no-arroba: Registry", () => {
   });
 
   it("rejects invalid platform", async () => {
-    const badHash = handleHashBytes("@testbad");
+    const badHash = handleHashBytes(`@bad${runTag}`);
     const recordPda = handleRecordPda(99, badHash);
 
     try {
@@ -200,31 +210,51 @@ describe("paga-no-arroba: Registry", () => {
   });
 });
 
+// ── Vault — SOL flows ─────────────────────────────────────────────────────────
+
 describe("paga-no-arroba: Vault — SOL flows", () => {
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
+  const registryProgram = anchor.workspace.Registry as Program<any>;
   const vaultProgram = anchor.workspace.Vault as Program<any>;
-
   const authority = provider.wallet as anchor.Wallet;
+
+  // Deterministic claimer — destination_wallet consistent across runs
+  const claimer = makeKeypair("pay-on-handle-test-claimer-v1");
+  // Fresh sender per run — avoids nonce/vault PDA conflicts
   const sender = Keypair.generate();
-  const claimer = Keypair.generate();
-  const feeCollector = Keypair.generate();
 
   const [vaultConfigPda] = PublicKey.findProgramAddressSync(
     [Buffer.from("vault_config")],
     vaultProgram.programId
   );
-
   const [senderNoncePda] = PublicKey.findProgramAddressSync(
     [Buffer.from("nonce"), sender.publicKey.toBuffer()],
     vaultProgram.programId
   );
+  const [registryConfigPda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("config")],
+    registryProgram.programId
+  );
 
-  const recipientHandle = "@maria_souza";
+  // Per-run unique handle to avoid PDA collision with previous runs
+  const runTag = Date.now().toString(36);
+  const recipientHandle = `@maria${runTag}`;
   const recipientHash = handleHashBytes(recipientHandle);
 
+  const [handleRecordPda] = PublicKey.findProgramAddressSync(
+    [
+      Buffer.from("handle"),
+      Buffer.from([PLATFORM_INSTAGRAM]),
+      Buffer.from(recipientHash),
+    ],
+    registryProgram.programId
+  );
+
   let vaultNonce = 0;
+  // Resolved after reading vault config (may differ from random feeCollector)
+  let actualFeeCollector: PublicKey;
 
   function getVaultPda(nonce: number): PublicKey {
     const nonceBytes = Buffer.alloc(8);
@@ -237,27 +267,67 @@ describe("paga-no-arroba: Vault — SOL flows", () => {
   }
 
   before(async () => {
-    await airdrop(provider, sender.publicKey, 10);
-    await airdrop(provider, claimer.publicKey, 2);
-    await airdrop(provider, feeCollector.publicKey, 0.1);
+    await fund(provider, sender.publicKey, 0.25);
+    await fund(provider, claimer.publicKey, 0.02);
 
-    await vaultProgram.methods
-      .initializeVaultConfig(feeCollector.publicKey)
+    // Initialize vault config (idempotent); read actual fee_collector from state
+    try {
+      const tempFeeCollector = makeKeypair("pay-on-handle-test-fee-collector-v1");
+      await fund(provider, tempFeeCollector.publicKey, 0.01);
+      await vaultProgram.methods
+        .initializeVaultConfig(tempFeeCollector.publicKey)
+        .accounts({
+          config: vaultConfigPda,
+          authority: authority.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+      actualFeeCollector = tempFeeCollector.publicKey;
+    } catch (e: any) {
+      if (!e.message.includes("already in use")) throw e;
+      const cfg = await vaultProgram.account.vaultConfig.fetch(vaultConfigPda);
+      actualFeeCollector = cfg.feeCollector;
+    }
+
+    // Ensure registry config exists (idempotent)
+    try {
+      await registryProgram.methods
+        .initializeConfig(Keypair.generate().publicKey)
+        .accounts({
+          config: registryConfigPda,
+          authority: authority.publicKey,
+          systemProgram: SystemProgram.programId,
+        })
+        .rpc();
+    } catch (e: any) {
+      if (!e.message.includes("already in use")) throw e;
+    }
+
+    // Register per-run handle with destination_wallet = claimer
+    await registryProgram.methods
+      .registerHandle(
+        PLATFORM_INSTAGRAM,
+        recipientHash,
+        claimer.publicKey,
+        Buffer.from("valid-jwt-proof")
+      )
       .accounts({
-        config: vaultConfigPda,
-        authority: authority.publicKey,
+        handleRecord: handleRecordPda,
+        config: registryConfigPda,
+        owner: claimer.publicKey,
         systemProgram: SystemProgram.programId,
       })
+      .signers([claimer])
       .rpc();
   });
 
   it("create SOL vault and check fee (0.5%)", async () => {
-    const grossLamports = 1_000_000_000; // 1 SOL
-    const expectedFee = Math.floor(grossLamports * 50 / 10_000); // 5_000_000
+    const grossLamports = 50_000_000; // 0.05 SOL
+    const expectedFee = Math.floor((grossLamports * 50) / 10_000);
     const expectedNet = grossLamports - expectedFee;
 
     const vaultPda = getVaultPda(vaultNonce);
-    const feeBalanceBefore = await provider.connection.getBalance(feeCollector.publicKey);
+    const feeBalanceBefore = await provider.connection.getBalance(actualFeeCollector);
 
     await vaultProgram.methods
       .createSolVault(
@@ -270,7 +340,7 @@ describe("paga-no-arroba: Vault — SOL flows", () => {
         vault: vaultPda,
         senderNonce: senderNoncePda,
         config: vaultConfigPda,
-        feeCollector: feeCollector.publicKey,
+        feeCollector: actualFeeCollector,
         sender: sender.publicKey,
         systemProgram: SystemProgram.programId,
       })
@@ -283,7 +353,7 @@ describe("paga-no-arroba: Vault — SOL flows", () => {
     assert.equal(vault.recipientPlatform, PLATFORM_INSTAGRAM);
     assert.equal(vault.status.pending !== undefined, true);
 
-    const feeBalanceAfter = await provider.connection.getBalance(feeCollector.publicKey);
+    const feeBalanceAfter = await provider.connection.getBalance(actualFeeCollector);
     assert.equal(feeBalanceAfter - feeBalanceBefore, expectedFee);
   });
 
@@ -298,6 +368,7 @@ describe("paga-no-arroba: Vault — SOL flows", () => {
       .claimSolVault(recipientHash)
       .accounts({
         vault: vaultPda,
+        handleRecord: handleRecordPda,
         claimer: claimer.publicKey,
         systemProgram: SystemProgram.programId,
       })
@@ -309,11 +380,10 @@ describe("paga-no-arroba: Vault — SOL flows", () => {
     assert.isNotNull(claimedVault.claimedAt);
 
     const claimerBalanceAfter = await provider.connection.getBalance(claimer.publicKey);
-    // Balance should increase by net amount (minus tx fee, which is small)
     assert.approximately(
       claimerBalanceAfter - claimerBalanceBefore,
       netAmount,
-      10_000 // allow ~0.00001 SOL tx fee
+      10_000
     );
 
     vaultNonce++;
@@ -327,6 +397,7 @@ describe("paga-no-arroba: Vault — SOL flows", () => {
         .claimSolVault(recipientHash)
         .accounts({
           vault: vaultPda,
+          handleRecord: handleRecordPda,
           claimer: claimer.publicKey,
           systemProgram: SystemProgram.programId,
         })
@@ -339,20 +410,19 @@ describe("paga-no-arroba: Vault — SOL flows", () => {
   });
 
   it("wrong handle hash is rejected", async () => {
-    // Create a new vault
     const vaultPda = getVaultPda(vaultNonce);
     await vaultProgram.methods
       .createSolVault(
         PLATFORM_INSTAGRAM,
         recipientHash,
         new BN(vaultNonce),
-        new BN(500_000_000)
+        new BN(10_000_000)
       )
       .accounts({
         vault: vaultPda,
         senderNonce: senderNoncePda,
         config: vaultConfigPda,
-        feeCollector: feeCollector.publicKey,
+        feeCollector: actualFeeCollector,
         sender: sender.publicKey,
         systemProgram: SystemProgram.programId,
       })
@@ -361,10 +431,12 @@ describe("paga-no-arroba: Vault — SOL flows", () => {
 
     const wrongHash = handleHashBytes("@wrong_person");
     try {
+      // HandleMismatch fires before PDA check — any valid handleRecord works
       await vaultProgram.methods
         .claimSolVault(wrongHash)
         .accounts({
           vault: vaultPda,
+          handleRecord: handleRecordPda,
           claimer: claimer.publicKey,
           systemProgram: SystemProgram.programId,
         })
@@ -385,13 +457,13 @@ describe("paga-no-arroba: Vault — SOL flows", () => {
         PLATFORM_INSTAGRAM,
         recipientHash,
         new BN(vaultNonce),
-        new BN(200_000_000)
+        new BN(10_000_000)
       )
       .accounts({
         vault: vaultPda,
         senderNonce: senderNoncePda,
         config: vaultConfigPda,
-        feeCollector: feeCollector.publicKey,
+        feeCollector: actualFeeCollector,
         sender: sender.publicKey,
         systemProgram: SystemProgram.programId,
       })
@@ -423,13 +495,13 @@ describe("paga-no-arroba: Vault — SOL flows", () => {
         PLATFORM_INSTAGRAM,
         recipientHash,
         new BN(vaultNonce),
-        new BN(200_000_000)
+        new BN(10_000_000)
       )
       .accounts({
         vault: vaultPda,
         senderNonce: senderNoncePda,
         config: vaultConfigPda,
-        feeCollector: feeCollector.publicKey,
+        feeCollector: actualFeeCollector,
         sender: sender.publicKey,
         systemProgram: SystemProgram.programId,
       })
@@ -448,7 +520,6 @@ describe("paga-no-arroba: Vault — SOL flows", () => {
         .rpc();
       assert.fail("Should have thrown");
     } catch (e: any) {
-      // Either constraint error or Unauthorized
       assert.ok(e.message.length > 0);
     }
 

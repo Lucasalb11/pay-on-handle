@@ -70,7 +70,9 @@ pub fn create_sol_vault_handler(
         .checked_mul(config.fee_bps as u128)
         .ok_or(VaultError::Overflow)?
         .checked_div(BPS_DIVISOR as u128)
-        .ok_or(VaultError::FeeCalculationError)? as u64;
+        .ok_or(VaultError::FeeCalculationError)?
+        .try_into()
+        .map_err(|_| error!(VaultError::Overflow))?;
 
     let net_amount = gross_amount.checked_sub(fee).ok_or(VaultError::Underflow)?;
 
@@ -237,7 +239,9 @@ pub fn create_spl_vault_handler(
         .checked_mul(config.fee_bps as u128)
         .ok_or(VaultError::Overflow)?
         .checked_div(BPS_DIVISOR as u128)
-        .ok_or(VaultError::FeeCalculationError)? as u64;
+        .ok_or(VaultError::FeeCalculationError)?
+        .try_into()
+        .map_err(|_| error!(VaultError::Overflow))?;
 
     let net_amount = gross_amount.checked_sub(fee).ok_or(VaultError::Underflow)?;
 

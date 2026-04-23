@@ -2,7 +2,7 @@
 
 > Send SOL and USDC to any Instagram, X (Twitter), or WhatsApp handle. No wallet required to receive.
 
-Built for the **Colosseum Frontier Hackathon** by Superteam Brazil.
+Built for the **Colosseum Frontier Hackathon**
 
 ---
 
@@ -148,7 +148,7 @@ Manages 7-day payment escrows with per-sender nonces.
 | `claim_vault` | Recipient claims by proving handle ownership |
 | `refund_vault` | Sender reclaims after expiry |
 
-**PaymentVault PDA seeds:** `["vault", sender_pubkey, nonce_u64_le]`  
+**PaymentVault PDA seeds:** `["vault", sender_pubkey, nonce_u64_le]`
 **SenderNonce PDA seeds:** `["nonce", sender_pubkey]`
 
 **VaultStatus enum:** `Pending(0)` → `Claimed(1)` or `Refunded(2)` or `Expired(3)`
@@ -292,14 +292,112 @@ npm run dev
 ```bash
 # app/.env.local
 NEXT_PUBLIC_PRIVY_APP_ID=your_privy_app_id
-NEXT_PUBLIC_RPC_ENDPOINT=https://api.devnet.solana.com
+NEXT_PUBLIC_RPC_ENDPOINT=https://devnet.helius-rpc.com/?api-key=YOUR_KEY
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 
-# Optional: for relayer/gasless claims
+# Relayer keypair (base58) — pays for on-chain register_handle txs
 RELAYER_PRIVATE_KEY=base58_encoded_key
+
+# Privy server-side JWT verification
+PRIVY_APP_SECRET=your_privy_app_secret
+
+# Helius
 HELIUS_API_KEY=your_helius_key
-OPENPIX_API_KEY=your_openpix_key   # PIX off-ramp
-BRLA_API_KEY=your_brla_key         # BRL stablecoin
+HELIUS_WEBHOOK_SECRET=your_webhook_secret
+
+# PIX off-ramp (future)
+OPENPIX_APP_ID=your_openpix_key
+BRLA_API_KEY=your_brla_key
+
+# Instagram OAuth (future)
+META_APP_ID=your_meta_app_id
+META_APP_SECRET=your_meta_app_secret
+META_REDIRECT_URI=https://your-domain.com/api/auth/instagram/callback
+
+# Redis (required for PIX store persistence)
+UPSTASH_REDIS_REST_URL=https://xxx.upstash.io
+UPSTASH_REDIS_REST_TOKEN=your_token
+```
+
+---
+
+## Deployment
+
+### Option A — Vercel (recommended for frontend)
+
+Vercel is the simplest path: connect your GitHub repo and Vercel handles the build automatically.
+
+**Requirements before deploying:**
+- `output: 'standalone'` is already set in `next.config.mjs` ✅
+- All `NEXT_PUBLIC_*` env vars must be set in Vercel dashboard
+- Server-only env vars (`RELAYER_PRIVATE_KEY`, `HELIUS_API_KEY`, etc.) are set as non-public variables
+- Add **Upstash Redis** integration (free tier) for PIX store persistence
+
+**Steps:**
+1. Push the `app/` directory (or the full repo) to GitHub
+2. Import the repo in [vercel.com/new](https://vercel.com/new)
+3. Set **Root Directory** to `pay-on-handle/app`
+4. Add all environment variables under *Settings → Environment Variables*
+5. Deploy
+
+**Limitation:** Vercel serverless functions are stateless — `pix-store.ts` (in-memory `Map`) loses state between requests. Migrate to Upstash Redis before enabling PIX.
+
+---
+
+### Option B — Railway (full Docker deploy)
+
+Railway runs a persistent Node.js container, making it simpler for stateful use cases.
+
+**`next.config.mjs`** already has `output: 'standalone'` ✅
+
+**Create `app/Dockerfile`:**
+
+```dockerfile
+FROM node:20-alpine AS builder
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:20-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
+EXPOSE 3000
+CMD ["node", "server.js"]
+```
+
+**Steps:**
+1. Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub Repo
+2. Select your repo; set **Root Directory** to `pay-on-handle/app`
+3. Railway auto-detects Next.js — or point it to the Dockerfile above
+4. Add a **Redis** service inside the same Railway project (for PIX store)
+5. Add all environment variables in *Variables* tab (Railway auto-injects `REDIS_URL`)
+6. Set `NEXT_PUBLIC_APP_URL` to your Railway-generated URL (e.g. `https://pay-on-handle-production-70a5.up.railway.app`)
+7. Deploy
+
+**Environment variables for Railway:**
+
+```bash
+# Public (exposed to browser)
+NEXT_PUBLIC_PRIVY_APP_ID=cmo0pavcd00860cjp0engxymy
+NEXT_PUBLIC_RPC_ENDPOINT=https://devnet.helius-rpc.com/?api-key=YOUR_KEY
+NEXT_PUBLIC_VAULT_PROGRAM_ID=EgS854XfeyTkuTKpYzDD3h5kiKMt4h3J37hGaBfuDN4H
+NEXT_PUBLIC_REGISTRY_PROGRAM_ID=AT8S64nJohSwwAv4BxfvAxwaWaVnfFvfsVXVjA8DZkvX
+NEXT_PUBLIC_FEE_COLLECTOR_PROGRAM_ID=CxMBNwbovsvLTe7bSuca8X26WS7PW81VtDu3oLyfSG6s
+NEXT_PUBLIC_APP_URL=https://pay-on-handle-production-70a5.up.railway.app
+
+# Server-only
+RELAYER_PRIVATE_KEY=<bs58 keypair — keep secret>
+PRIVY_APP_SECRET=<from Privy dashboard → API Keys>
+HELIUS_API_KEY=e657af06-55cf-4b04-bb72-09909232d6c4
+HELIUS_WEBHOOK_SECRET=<generate and set in Helius dashboard>
+OPENPIX_APP_ID=<Woovi — pending>
+REDIS_URL=<auto-injected by Railway Redis service>
 ```
 
 ---
@@ -321,16 +419,38 @@ BRLA_API_KEY=your_brla_key         # BRL stablecoin
 
 ## Roadmap
 
+### Phase 1 — Devnet Live (current sprint)
+
 - [x] On-chain programs (Registry, Vault, FeeCollector)
 - [x] Next.js 14 PWA (send, claim, wallet, DeFi, settings)
 - [x] TypeScript SDK
-- [ ] Devnet deployment + integration tests
-- [ ] Jupiter swap (auto-convert SOL→USDC on claim)
-- [ ] Kamino yield vault (idle escrow earns yield)
-- [ ] PIX off-ramp via OpenPix/BRLA Digital
-- [ ] Push notifications via Helius webhooks
+- [x] `next build` passing, `output: standalone`
+- [ ] Initialize VaultConfig PDA on devnet
+- [ ] Configure Helius webhook → `/api/webhooks/helius`
+- [ ] Twitter OAuth enabled in Privy dashboard
+- [ ] Handle registration onboarding flow (auto-register after OAuth)
+- [ ] Real wallet activity history via Helius `getTransactionHistory`
+
+### Phase 2 — PIX Off-ramp
+
+- [ ] Migrate `pix-store.ts` from in-memory `Map` to Redis (Upstash/Railway)
+- [ ] Integrate OpenPix/Woovi API for PIX dispatch
+- [ ] Jupiter swap: SOL → USDC on claim (before PIX conversion)
+- [ ] BRLA Digital integration for BRL stablecoin path
+
+### Phase 3 — Instagram + Program Hardening
+
+- [ ] Instagram OAuth via Meta Graph API (`/api/auth/instagram/callback`)
+- [ ] Close vault PDAs after claim/refund (recover ~0.002 SOL rent)
+- [ ] Mint whitelist on `create_spl_vault` (accept only USDC)
+- [ ] ZK proof of handle ownership (replace MVP stub in Registry)
+
+### Phase 4 — DeFi + Cross-Chain
+
+- [ ] Kamino yield vault — idle escrow earns yield while waiting for claim
+- [ ] Orca/Meteora LP integration
 - [ ] Ika cross-chain bridgeless deposits
-- [ ] Encrypt confidential transfer option
+- [ ] Push notifications via Helius webhooks
 
 ---
 

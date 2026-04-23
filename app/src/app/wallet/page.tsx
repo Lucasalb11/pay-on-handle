@@ -2,14 +2,21 @@
 
 import { usePrivy, useSolanaWallets } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { motion } from "framer-motion";
-import { Button } from "@/components/ui/button";
-import { ArrowUpRight, ArrowDownLeft, Plus, RefreshCw } from "lucide-react";
+import {
+  Send,
+  ArrowDownLeft,
+  QrCode,
+  TrendingUp,
+  RefreshCw,
+  ArrowUpRight,
+} from "lucide-react";
 import { connection } from "@/lib/solana";
 import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
 import { useQuery } from "@tanstack/react-query";
 import { getSolPrice } from "@/lib/solana";
+import { BottomNav } from "@/components/BottomNav";
 
 function useWalletBalance(address: string | undefined) {
   return useQuery({
@@ -32,8 +39,16 @@ function useSolPrice() {
   });
 }
 
+const PROTOCOLS = [
+  { name: "Jupiter", icon: "🔄", color: "#C7F284" },
+  { name: "Kamino", icon: "🏦", color: "#00D4FF" },
+  { name: "Orca", icon: "🐋", color: "#8B5CF6" },
+  { name: "Jito", icon: "⚡", color: "#F59E0B" },
+  { name: "PIX", icon: "₽", color: "#14F195" },
+];
+
 export default function WalletPage() {
-  const { ready, authenticated, logout } = usePrivy();
+  const { ready, authenticated } = usePrivy();
   const { wallets } = useSolanaWallets();
   const router = useRouter();
 
@@ -54,62 +69,78 @@ export default function WalletPage() {
     if (ready && !authenticated) router.replace("/");
   }, [ready, authenticated, router]);
 
+  const initial = address ? address[0].toUpperCase() : "U";
+
   return (
-    <main className="min-h-dvh flex flex-col pb-24">
+    <main className="relative min-h-dvh flex flex-col pb-32 bg-[#08080E] overflow-hidden">
+      {/* Ambient orb */}
+      <div className="pointer-events-none absolute top-0 right-0 w-72 h-72 bg-solana-purple/10 rounded-full blur-[100px]" />
+      <div className="pointer-events-none absolute top-[40%] -left-20 w-64 h-64 bg-solana-green/5 rounded-full blur-[100px]" />
+
       {/* Header */}
-      <div className="flex items-center justify-between px-5 pt-12 pb-4">
+      <div className="relative z-10 flex items-center justify-between px-5 pt-14 pb-5">
         <div>
-          <h1 className="font-display text-2xl font-bold text-white">
+          <p className="text-white/40 text-sm">Olá 👋</p>
+          <h1 className="font-display text-xl font-bold text-white">
             Paga no @
           </h1>
-          {address && (
-            <p className="text-white/40 text-xs font-mono mt-0.5">
-              {address.slice(0, 4)}...{address.slice(-4)}
-            </p>
-          )}
         </div>
-        <button
-          onClick={() => refetchBalance()}
-          className="p-2 rounded-xl bg-bg-card border border-bg-border"
-        >
-          <RefreshCw
-            className={`w-4 h-4 text-white/50 ${
-              isFetching ? "animate-spin" : ""
-            }`}
-          />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => refetchBalance()}
+            aria-label="Atualizar saldo"
+            className="p-2 rounded-xl glass text-white/60"
+          >
+            <RefreshCw
+              className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`}
+            />
+          </button>
+          <button
+            onClick={() => router.push("/settings")}
+            aria-label="Abrir perfil"
+            className="w-10 h-10 rounded-xl flex items-center justify-center text-black font-bold text-sm"
+            style={{
+              background: "linear-gradient(135deg, #9945FF 0%, #14F195 100%)",
+            }}
+          >
+            {initial}
+          </button>
+        </div>
       </div>
 
       {/* Balance card */}
-      <motion.div
-        initial={{ opacity: 0, scale: 0.97 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="mx-5 rounded-3xl bg-gradient-card border border-bg-border p-6 mb-6"
-        style={{
-          background: "linear-gradient(135deg, #111118 0%, #1A1A2E 100%)",
-        }}
-      >
-        <p className="text-white/40 text-sm mb-1">Saldo total</p>
-        <p className="font-display text-4xl font-bold text-white mb-1">
-          R${" "}
-          {balanceBrl.toLocaleString("pt-BR", {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2,
-          })}
-        </p>
-        <p className="text-white/40 text-sm">
-          {solBalance.toFixed(4)} SOL · ${balanceUsd.toFixed(2)} USD
-        </p>
+      <div className="relative z-10 mx-5 mb-5">
+        <motion.div
+          initial={{ opacity: 0, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="glass-card rounded-3xl p-6 relative overflow-hidden"
+        >
+          {/* Inner orb */}
+          <div className="absolute top-0 right-0 w-32 h-32 bg-solana-purple/20 rounded-full blur-2xl" />
+          <div className="absolute -bottom-8 -left-6 w-24 h-24 bg-solana-green/10 rounded-full blur-2xl" />
 
-        {/* Gradient bar */}
-        <div className="mt-4 h-0.5 rounded-full bg-gradient-solana opacity-60" />
-      </motion.div>
+          <p className="relative text-white/50 text-xs uppercase tracking-wider mb-2">
+            Saldo disponível
+          </p>
+          <p className="relative font-display text-5xl font-bold text-white leading-none mb-2">
+            R${" "}
+            {balanceBrl.toLocaleString("pt-BR", {
+              minimumFractionDigits: 2,
+              maximumFractionDigits: 2,
+            })}
+          </p>
+          <p className="relative text-white/40 text-sm">
+            {solBalance.toFixed(4)} SOL · ${balanceUsd.toFixed(2)} USD
+          </p>
+          <div className="relative mt-5 h-px bg-gradient-to-r from-solana-purple via-solana-teal to-solana-green opacity-50" />
+        </motion.div>
+      </div>
 
       {/* Quick actions */}
-      <div className="px-5 grid grid-cols-3 gap-3 mb-6">
+      <div className="relative z-10 px-5 grid grid-cols-4 gap-3 mb-6">
         {[
           {
-            icon: <ArrowUpRight className="w-5 h-5" />,
+            icon: <Send className="w-5 h-5" />,
             label: "Enviar",
             onClick: () => router.push("/send"),
             accent: true,
@@ -121,50 +152,85 @@ export default function WalletPage() {
             accent: false,
           },
           {
-            icon: <Plus className="w-5 h-5" />,
-            label: "Depositar",
+            icon: <QrCode className="w-5 h-5" />,
+            label: "PIX",
             onClick: () => {},
+            accent: false,
+          },
+          {
+            icon: <TrendingUp className="w-5 h-5" />,
+            label: "DeFi",
+            onClick: () => router.push("/defi"),
             accent: false,
           },
         ].map(({ icon, label, onClick, accent }) => (
           <button
             key={label}
             onClick={onClick}
-            className={`flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all
-              ${
-                accent
-                  ? "bg-solana-purple/20 border-solana-purple/40 text-solana-purple"
-                  : "bg-bg-card border-bg-border text-white/70"
-              }`}
+            className={`flex flex-col items-center gap-2 p-3.5 rounded-2xl transition-all ${
+              accent
+                ? "bg-solana-purple/15 border border-solana-purple/30 text-solana-purple"
+                : "glass text-white/70"
+            }`}
           >
             {icon}
-            <span className="text-xs font-medium">{label}</span>
+            <span className="text-[11px] font-medium">{label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Protocols */}
+      <h2 className="relative z-10 px-5 text-white/40 text-xs font-semibold uppercase tracking-wider mb-3">
+        Protocolos
+      </h2>
+      <div className="relative z-10 flex gap-3 overflow-x-auto px-5 pb-2 mb-5 scrollbar-hide">
+        {PROTOCOLS.map((p) => (
+          <button
+            key={p.name}
+            className="glass rounded-2xl p-3 min-w-[80px] flex flex-col items-center gap-1.5 shrink-0"
+          >
+            <span className="text-xl" aria-hidden>
+              {p.icon}
+            </span>
+            <span
+              className="text-[10px] font-medium"
+              style={{ color: p.color }}
+            >
+              {p.name}
+            </span>
           </button>
         ))}
       </div>
 
       {/* DeFi banner */}
-      <div className="px-5 mb-6">
+      <div className="relative z-10 mx-5 mb-6">
         <motion.button
           whileTap={{ scale: 0.98 }}
           onClick={() => router.push("/defi")}
-          className="w-full bg-solana-green/10 border border-solana-green/30 rounded-2xl p-4 flex items-center justify-between"
+          className="w-full glass-card rounded-2xl p-4 flex items-center justify-between"
         >
           <div className="text-left">
             <p className="text-solana-green font-semibold text-sm">
               Rendimento DeFi
             </p>
-            <p className="text-white/50 text-xs">
-              Deposite e ganhe até 12% ao ano
-            </p>
+            <p className="text-white/40 text-xs">Até 12% ao ano</p>
           </div>
-          <ArrowUpRight className="w-5 h-5 text-solana-green" />
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-semibold text-solana-green bg-solana-green/10 border border-solana-green/30 px-2 py-1 rounded-full">
+              12% APY
+            </span>
+            <div className="w-9 h-9 rounded-full bg-solana-green/15 flex items-center justify-center">
+              <ArrowUpRight className="w-4 h-4 text-solana-green" />
+            </div>
+          </div>
         </motion.button>
       </div>
 
-      {/* Recent transactions — placeholder */}
-      <div className="px-5">
-        <h2 className="text-white/50 text-sm font-medium mb-3">Histórico</h2>
+      {/* Activity */}
+      <div className="relative z-10 px-5">
+        <h2 className="text-white/40 text-xs font-semibold uppercase tracking-wider mb-3">
+          Atividade
+        </h2>
         <div className="space-y-2">
           {[
             {
@@ -182,16 +248,15 @@ export default function WalletPage() {
           ].map((tx) => (
             <div
               key={tx.handle}
-              className="flex items-center justify-between bg-bg-card border border-bg-border rounded-2xl px-4 py-3"
+              className="flex items-center justify-between glass rounded-2xl px-4 py-3"
             >
               <div className="flex items-center gap-3">
                 <div
-                  className={`w-8 h-8 rounded-full flex items-center justify-center text-sm
-                    ${
-                      tx.type === "sent"
-                        ? "bg-red-500/10 text-red-400"
-                        : "bg-green-500/10 text-green-400"
-                    }`}
+                  className={`w-9 h-9 rounded-xl flex items-center justify-center text-sm ${
+                    tx.type === "sent"
+                      ? "bg-red-500/10 text-red-400"
+                      : "bg-solana-green/10 text-solana-green"
+                  }`}
                 >
                   {tx.type === "sent" ? "↑" : "↓"}
                 </div>
@@ -213,27 +278,7 @@ export default function WalletPage() {
         </div>
       </div>
 
-      {/* Bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 max-w-[430px] mx-auto">
-        <div className="bg-bg/80 backdrop-blur-xl border-t border-bg-border px-5 py-3 flex justify-around">
-          {[
-            { label: "Carteira", icon: "💰", href: "/wallet", active: true },
-            { label: "Enviar", icon: "📤", href: "/send", active: false },
-            { label: "DeFi", icon: "📈", href: "/defi", active: false },
-            { label: "Config", icon: "⚙️", href: "/settings", active: false },
-          ].map(({ label, icon, href, active }) => (
-            <button
-              key={label}
-              onClick={() => router.push(href)}
-              className={`flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-all
-                ${active ? "text-solana-purple" : "text-white/30"}`}
-            >
-              <span className="text-lg">{icon}</span>
-              <span className="text-[10px] font-medium">{label}</span>
-            </button>
-          ))}
-        </div>
-      </nav>
+      <BottomNav />
     </main>
   );
 }

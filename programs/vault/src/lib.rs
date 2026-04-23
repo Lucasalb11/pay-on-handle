@@ -27,6 +27,13 @@ pub mod vault {
         instructions::initialize_config::update_handler(ctx, new_fee_bps, new_claim_period)
     }
 
+    pub fn update_fee_collector(
+        ctx: Context<UpdateFeeCollector>,
+        new_fee_collector: Pubkey,
+    ) -> Result<()> {
+        instructions::initialize_config::update_fee_collector_handler(ctx, new_fee_collector)
+    }
+
     /// Create an escrow vault sending native SOL.
     pub fn create_sol_vault(
         ctx: Context<CreateSolVault>,

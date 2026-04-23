@@ -1,47 +1,40 @@
 "use client";
 
 import { PrivyProvider } from "@privy-io/react-auth";
+import { toSolanaWalletConnectors } from "@privy-io/react-auth/solana";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
 
+const solanaConnectors = toSolanaWalletConnectors({ shouldAutoConnect: true });
+
 const privyConfig = {
-  loginMethods: ["google", "apple", "twitter", "email", "sms"] as (
+  loginMethods: ["google", "apple", "twitter", "email", "sms", "wallet"] as (
     | "google"
     | "apple"
     | "twitter"
     | "email"
     | "sms"
+    | "wallet"
   )[],
   appearance: {
     theme: "dark" as const,
     accentColor: "#9945FF" as `#${string}`,
     logo: "/logo.png",
     showWalletLoginFirst: false,
+    walletChainType: "solana-only" as const,
+    walletList: ["phantom", "solflare", "detected_solana_wallets"] as (
+      | "phantom"
+      | "solflare"
+      | "detected_solana_wallets"
+    )[],
   },
   embeddedWallets: {
     createOnLogin: "users-without-wallets" as const,
     requireUserPasswordOnCreate: false,
     noPromptOnSignature: false,
   },
-  defaultChain: {
-    id: 101,
-    name: "Solana",
-    network: "mainnet-beta",
-    nativeCurrency: { name: "SOL", symbol: "SOL", decimals: 9 },
-    rpcUrls: {
-      default: {
-        http: [
-          process.env.NEXT_PUBLIC_RPC_ENDPOINT ??
-            "https://api.devnet.solana.com",
-        ],
-      },
-      public: {
-        http: [
-          process.env.NEXT_PUBLIC_RPC_ENDPOINT ??
-            "https://api.devnet.solana.com",
-        ],
-      },
-    },
+  externalWallets: {
+    solana: { connectors: solanaConnectors },
   },
 };
 

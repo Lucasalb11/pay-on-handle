@@ -50,6 +50,29 @@ pub struct VaultConfigInitialized {
     pub timestamp: i64,
 }
 
+// ── update_fee_collector ───────────────────────────────────────────────────────
+
+#[derive(Accounts)]
+pub struct UpdateFeeCollector<'info> {
+    #[account(
+        mut,
+        seeds = [b"vault_config"],
+        bump = config.bump,
+        has_one = authority
+    )]
+    pub config: Account<'info, VaultConfig>,
+
+    pub authority: Signer<'info>,
+}
+
+pub fn update_fee_collector_handler(
+    ctx: Context<UpdateFeeCollector>,
+    new_fee_collector: Pubkey,
+) -> Result<()> {
+    ctx.accounts.config.fee_collector = new_fee_collector;
+    Ok(())
+}
+
 // ── update_config lives here too ──────────────────────────────────────────────
 
 #[derive(Accounts)]

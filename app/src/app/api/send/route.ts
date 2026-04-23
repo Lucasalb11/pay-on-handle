@@ -3,20 +3,25 @@ import {
   Connection,
   PublicKey,
   Transaction,
+  TransactionInstruction,
   SystemProgram,
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
 import {
+  getAssociatedTokenAddress,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
+import {
   RPC_ENDPOINT,
   VAULT_PROGRAM_ID,
-  REGISTRY_PROGRAM_ID,
   FEE_COLLECTOR_PROGRAM_ID,
   NATIVE_SOL_MINT,
+  USDC_DEVNET_MINT,
   FEE_BPS,
 } from "@/lib/constants";
 import {
   vaultPda,
-  handleRecordPda,
   senderNoncePda,
   vaultConfigPda,
   getSenderNonce,
@@ -25,11 +30,9 @@ import { hashHandle } from "@/lib/handle";
 
 const connection = new Connection(RPC_ENDPOINT, "confirmed");
 
-// Anchor instruction discriminators (sha256("global:<ix_name>")[0..8])
-// These are deterministic — compute once from the IDL.
-const CREATE_VAULT_DISCRIMINATOR = Buffer.from([
-  0x29, 0x0f, 0xa3, 0xe8, 0x7e, 0xb0, 0x2d, 0x2a,
-]);
+// Real Anchor discriminators from IDL
+const DISC_CREATE_SOL = Buffer.from([199, 85, 223, 31, 210, 142, 93, 76]);
+const DISC_CREATE_SPL = Buffer.from([70, 237, 30, 3, 24, 231, 70, 67]);
 
 type SendBody = {
   sender: string;
@@ -80,39 +83,81 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Derive PDAs
+  const isNative = amountSol !== undefined;
+  const mint = new PublicKey(isNative ? NATIVE_SOL_MINT : USDC_DEVNET_MINT);
+  const grossAmount = isNative
+    ? BigInt(Math.round(amountSol! * LAMPORTS_PER_SOL))
+    : BigInt(Math.round(amountUsdc! * 1_000_000));
+
+  const feeAmount = (grossAmount * BigInt(FEE_BPS)) / BigInt(10_000);
+  const netAmount = grossAmount - feeAmount;
+
   const handleHash = hashHandle(handle);
   const nonce = await getSenderNonce(senderPubkey);
   const vault = vaultPda(senderPubkey, nonce);
   const noncePda = senderNoncePda(senderPubkey);
   const vaultConfig = vaultConfigPda();
-  const handleRecord = handleRecordPda(platform, handleHash);
   const feeCollectorPda = PublicKey.findProgramAddressSync(
     [Buffer.from("fee_collector")],
     new PublicKey(FEE_COLLECTOR_PROGRAM_ID)
   )[0];
 
-  // Instruction data layout:
-  // [8 discriminator][1 platform][32 handle_hash][8 amount][32 mint][8 nonce]
-  const isNative = amountSol !== undefined;
-  const mint = new PublicKey(NATIVE_SOL_MINT);
-  const amountLamports = isNative
-    ? BigInt(Math.round(amountSol! * LAMPORTS_PER_SOL))
-    : BigInt(Math.round(amountUsdc! * 1_000_000));
+  // Layout: [8 disc][1 platform][32 handle_hash][8 nonce][8 gross_amount]
+  const ixData = Buffer.alloc(57);
+  let keys: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[];
 
-  // Calculate fee
-  const feeAmount = (amountLamports * BigInt(FEE_BPS)) / BigInt(10_000);
-  const netAmount = amountLamports - feeAmount;
+  if (isNative) {
+    DISC_CREATE_SOL.copy(ixData, 0);
+    ixData.writeUInt8(platform, 8);
+    Buffer.from(handleHash).copy(ixData, 9);
+    ixData.writeBigUInt64LE(nonce, 41);
+    ixData.writeBigUInt64LE(grossAmount, 49);
 
-  const ixData = Buffer.alloc(8 + 1 + 32 + 8 + 32 + 8);
-  CREATE_VAULT_DISCRIMINATOR.copy(ixData, 0);
-  ixData.writeUInt8(platform, 8);
-  Buffer.from(handleHash).copy(ixData, 9);
-  ixData.writeBigUInt64LE(amountLamports, 41);
-  mint.toBuffer().copy(ixData, 49);
-  ixData.writeBigUInt64LE(nonce, 81);
+    // CreateSolVault context order: vault, sender_nonce, config, fee_collector, sender, system_program
+    keys = [
+      { pubkey: vault, isSigner: false, isWritable: true },
+      { pubkey: noncePda, isSigner: false, isWritable: true },
+      { pubkey: vaultConfig, isSigner: false, isWritable: false },
+      { pubkey: feeCollectorPda, isSigner: false, isWritable: true },
+      { pubkey: senderPubkey, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ];
+  } else {
+    DISC_CREATE_SPL.copy(ixData, 0);
+    ixData.writeUInt8(platform, 8);
+    Buffer.from(handleHash).copy(ixData, 9);
+    ixData.writeBigUInt64LE(nonce, 41);
+    ixData.writeBigUInt64LE(grossAmount, 49);
 
-  // Build unsigned transaction for the client to sign
+    const vaultAta = await getAssociatedTokenAddress(mint, vault, true);
+    const senderAta = await getAssociatedTokenAddress(mint, senderPubkey);
+    const feeCollectorAta = await getAssociatedTokenAddress(
+      mint,
+      feeCollectorPda
+    );
+
+    // CreateSplVault context order: vault, vault_token_account, sender_nonce, config,
+    //   mint, sender_token_account, fee_collector_token_account, sender,
+    //   token_program, associated_token_program, system_program
+    keys = [
+      { pubkey: vault, isSigner: false, isWritable: true },
+      { pubkey: vaultAta, isSigner: false, isWritable: true },
+      { pubkey: noncePda, isSigner: false, isWritable: true },
+      { pubkey: vaultConfig, isSigner: false, isWritable: false },
+      { pubkey: mint, isSigner: false, isWritable: false },
+      { pubkey: senderAta, isSigner: false, isWritable: true },
+      { pubkey: feeCollectorAta, isSigner: false, isWritable: true },
+      { pubkey: senderPubkey, isSigner: true, isWritable: true },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      {
+        pubkey: ASSOCIATED_TOKEN_PROGRAM_ID,
+        isSigner: false,
+        isWritable: false,
+      },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ];
+  }
+
   const { blockhash, lastValidBlockHeight } =
     await connection.getLatestBlockhash("confirmed");
 
@@ -121,29 +166,13 @@ export async function POST(req: NextRequest) {
     blockhash,
     lastValidBlockHeight,
   });
-
-  // For SOL vault: create_vault instruction
-  // Accounts order matches the Anchor context struct
-  const keys = [
-    { pubkey: senderPubkey, isSigner: true, isWritable: true },
-    { pubkey: vault, isSigner: false, isWritable: true },
-    { pubkey: noncePda, isSigner: false, isWritable: true },
-    { pubkey: vaultConfig, isSigner: false, isWritable: false },
-    { pubkey: handleRecord, isSigner: false, isWritable: false },
-    { pubkey: feeCollectorPda, isSigner: false, isWritable: true },
-    {
-      pubkey: new PublicKey(REGISTRY_PROGRAM_ID),
-      isSigner: false,
-      isWritable: false,
-    },
-    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-  ];
-
-  tx.add({
-    programId: new PublicKey(VAULT_PROGRAM_ID),
-    keys,
-    data: ixData,
-  });
+  tx.add(
+    new TransactionInstruction({
+      programId: new PublicKey(VAULT_PROGRAM_ID),
+      keys,
+      data: ixData,
+    })
+  );
 
   const serialized = tx.serialize({ requireAllSignatures: false });
 

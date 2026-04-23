@@ -7,6 +7,15 @@ pub const BPS_DIVISOR: u64 = 10_000;
 /// Wrapped SOL mint — used as the mint sentinel for native SOL vaults.
 pub const NATIVE_SOL_MINT: Pubkey =
     anchor_lang::prelude::pubkey!("So11111111111111111111111111111111111111112");
+
+/// Registry program that owns HandleRecord accounts.
+pub const REGISTRY_PROGRAM_ID: Pubkey =
+    anchor_lang::prelude::pubkey!("AT8S64nJohSwwAv4BxfvAxwaWaVnfFvfsVXVjA8DZkvX");
+
+/// Byte offsets within a HandleRecord account (after 8-byte Anchor discriminator).
+/// platform[1] + handle_hash[32] + owner[32] + destination_wallet[32] + verified[1]
+pub const HR_DEST_WALLET_OFFSET: usize = 73; // 8+1+32+32
+pub const HR_VERIFIED_OFFSET: usize = 105; // 8+1+32+32+32
 pub const USDC_DEVNET_MINT: Pubkey =
     anchor_lang::prelude::pubkey!("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
 pub const USDC_MAINNET_MINT: Pubkey =

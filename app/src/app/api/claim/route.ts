@@ -3,25 +3,31 @@ import {
   Connection,
   PublicKey,
   Transaction,
+  TransactionInstruction,
   SystemProgram,
 } from "@solana/web3.js";
 import {
+  getAssociatedTokenAddress,
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID,
+} from "@solana/spl-token";
+import {
   RPC_ENDPOINT,
   VAULT_PROGRAM_ID,
+  REGISTRY_PROGRAM_ID,
   NATIVE_SOL_MINT,
 } from "@/lib/constants";
-import { hashHandle } from "@/lib/handle";
+import { hashHandle, handleRecordPda } from "@/lib/handle";
 
 const connection = new Connection(RPC_ENDPOINT, "confirmed");
 
-const CLAIM_VAULT_DISCRIMINATOR = Buffer.from([
-  0x3d, 0x1e, 0xa6, 0x72, 0x5f, 0x4c, 0x38, 0x01,
-]);
+// Real Anchor discriminators from IDL
+const DISC_CLAIM_SOL = Buffer.from([121, 14, 252, 87, 97, 18, 163, 34]);
+const DISC_CLAIM_SPL = Buffer.from([93, 172, 104, 171, 174, 96, 106, 182]);
 
 type ClaimBody = {
   claimant: string;
   vaultId: string;
-  platform: number;
   handle: string;
 };
 
@@ -33,11 +39,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { claimant, vaultId, platform, handle } = body;
+  const { claimant, vaultId, handle } = body;
 
-  if (!claimant || !vaultId || platform === undefined || !handle) {
+  if (!claimant || !vaultId || !handle) {
     return NextResponse.json(
-      { error: "Missing required fields: claimant, vaultId, platform, handle" },
+      { error: "Missing required fields: claimant, vaultId, handle" },
       { status: 400 }
     );
   }
@@ -51,15 +57,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid public key" }, { status: 400 });
   }
 
-  // Read vault account to validate state
   const vaultInfo = await connection.getAccountInfo(vaultPubkey);
   if (!vaultInfo || vaultInfo.owner.toBase58() !== VAULT_PROGRAM_ID) {
     return NextResponse.json({ error: "Vault not found" }, { status: 404 });
   }
 
-  // Parse relevant fields
+  // PaymentVault layout (after 8-byte disc):
+  //   sender[32] handle_hash[32] platform[1] amount[8] mint[32] status[1] created_at[8] expires_at[8] ...
   const data = vaultInfo.data;
-  const statusByte = data[8 + 32 + 32 + 1 + 8 + 32]; // offset to status field
+  const statusByte = data[8 + 32 + 32 + 1 + 8 + 32]; // offset 113
   if (statusByte !== 0) {
     return NextResponse.json(
       { error: "Vault is not in pending state" },
@@ -69,24 +75,59 @@ export async function POST(req: NextRequest) {
 
   const expiresAt = Number(
     data.readBigInt64LE(8 + 32 + 32 + 1 + 8 + 32 + 1 + 8)
-  );
-  const now = Math.floor(Date.now() / 1000);
-  if (now > expiresAt) {
+  ); // offset 122
+  if (Math.floor(Date.now() / 1000) > expiresAt) {
     return NextResponse.json({ error: "Vault has expired" }, { status: 400 });
   }
 
-  const mint = new PublicKey(
-    data.slice(8 + 32 + 32 + 1 + 8, 8 + 32 + 32 + 1 + 8 + 32)
-  );
+  // PaymentVault layout: disc[8] sender[32] handle_hash[32] platform[1] amount[8] mint[32]
+  const platform = data[8 + 32 + 32]; // offset 72
+  const mint = new PublicKey(data.slice(81, 113)); // offset 81..113
   const isNative = mint.toBase58() === NATIVE_SOL_MINT;
 
   const handleHash = hashHandle(handle);
+  const hrPda = handleRecordPda(platform, handleHash);
 
-  // Build instruction data: [8 discriminator][1 platform][32 handle_hash]
-  const ixData = Buffer.alloc(8 + 1 + 32);
-  CLAIM_VAULT_DISCRIMINATOR.copy(ixData, 0);
-  ixData.writeUInt8(platform, 8);
-  Buffer.from(handleHash).copy(ixData, 9);
+  // Layout: [8 disc][32 handle_hash]
+  const ixData = Buffer.alloc(40);
+  let keys: { pubkey: PublicKey; isSigner: boolean; isWritable: boolean }[];
+
+  if (isNative) {
+    DISC_CLAIM_SOL.copy(ixData, 0);
+    Buffer.from(handleHash).copy(ixData, 8);
+
+    // ClaimSolVault context order: vault, handle_record, claimer, system_program
+    keys = [
+      { pubkey: vaultPubkey, isSigner: false, isWritable: true },
+      { pubkey: hrPda, isSigner: false, isWritable: false },
+      { pubkey: claimantPubkey, isSigner: true, isWritable: true },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ];
+  } else {
+    DISC_CLAIM_SPL.copy(ixData, 0);
+    Buffer.from(handleHash).copy(ixData, 8);
+
+    const vaultAta = await getAssociatedTokenAddress(mint, vaultPubkey, true);
+    const claimantAta = await getAssociatedTokenAddress(mint, claimantPubkey);
+
+    // ClaimSplVault context order: vault, vault_token_account, mint, claimer_token_account,
+    //   handle_record, claimer, token_program, associated_token_program, system_program
+    keys = [
+      { pubkey: vaultPubkey, isSigner: false, isWritable: true },
+      { pubkey: vaultAta, isSigner: false, isWritable: true },
+      { pubkey: mint, isSigner: false, isWritable: false },
+      { pubkey: claimantAta, isSigner: false, isWritable: true },
+      { pubkey: hrPda, isSigner: false, isWritable: false },
+      { pubkey: claimantPubkey, isSigner: true, isWritable: true },
+      { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+      {
+        pubkey: ASSOCIATED_TOKEN_PROGRAM_ID,
+        isSigner: false,
+        isWritable: false,
+      },
+      { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+    ];
+  }
 
   const { blockhash, lastValidBlockHeight } =
     await connection.getLatestBlockhash("confirmed");
@@ -96,45 +137,13 @@ export async function POST(req: NextRequest) {
     blockhash,
     lastValidBlockHeight,
   });
-
-  if (isNative) {
-    tx.add({
+  tx.add(
+    new TransactionInstruction({
       programId: new PublicKey(VAULT_PROGRAM_ID),
-      keys: [
-        { pubkey: claimantPubkey, isSigner: true, isWritable: true },
-        { pubkey: vaultPubkey, isSigner: false, isWritable: true },
-        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      ],
+      keys,
       data: ixData,
-    });
-  } else {
-    // SPL claim requires ATA accounts — derive them
-    const { getAssociatedTokenAddress } = await import("@solana/spl-token");
-    const claimantAta = await getAssociatedTokenAddress(mint, claimantPubkey);
-    const vaultTokenAccount = await getAssociatedTokenAddress(
-      mint,
-      vaultPubkey,
-      true
-    );
-
-    tx.add({
-      programId: new PublicKey(VAULT_PROGRAM_ID),
-      keys: [
-        { pubkey: claimantPubkey, isSigner: true, isWritable: true },
-        { pubkey: vaultPubkey, isSigner: false, isWritable: true },
-        { pubkey: claimantAta, isSigner: false, isWritable: true },
-        { pubkey: vaultTokenAccount, isSigner: false, isWritable: true },
-        { pubkey: mint, isSigner: false, isWritable: false },
-        {
-          pubkey: new PublicKey("TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"),
-          isSigner: false,
-          isWritable: false,
-        },
-        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
-      ],
-      data: ixData,
-    });
-  }
+    })
+  );
 
   const serialized = tx.serialize({ requireAllSignatures: false });
 

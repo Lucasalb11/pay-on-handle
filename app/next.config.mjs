@@ -1,7 +1,7 @@
-import type { NextConfig } from "next";
-
-const nextConfig: NextConfig = {
+/** @type {import('next').NextConfig} */
+const nextConfig = {
   reactStrictMode: true,
+  output: "standalone",
   transpilePackages: ["@coral-xyz/anchor"],
   webpack: (config) => {
     config.resolve.fallback = {

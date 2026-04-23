@@ -2,13 +2,19 @@
 
 import { usePrivy, useSolanaWallets } from "@privy-io/react-auth";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
-import { motion } from "framer-motion";
-import { ArrowUpRight, TrendingUp, Shield, Zap } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
+import { Search, TrendingUp, Shield, Zap, ArrowUpRight } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { connection } from "@/lib/solana";
 import { PublicKey, LAMPORTS_PER_SOL } from "@solana/web3.js";
+import { BottomNav } from "@/components/BottomNav";
+import { KaminoModal } from "@/components/defi/KaminoModal";
+import { OrcaModal } from "@/components/defi/OrcaModal";
+import { JitoModal } from "@/components/defi/JitoModal";
+import {
+  GenericProtocolModal,
+  type Protocol,
+} from "@/components/defi/GenericProtocolModal";
 
 function useWalletBalance(address: string | undefined) {
   return useQuery({
@@ -23,43 +29,96 @@ function useWalletBalance(address: string | undefined) {
   });
 }
 
-const STRATEGIES = [
+const PROTOCOLS: (Protocol & { category: string })[] = [
   {
-    name: "SOL Staking",
-    protocol: "Sanctum / Jito",
-    apy: "7-9%",
-    risk: "Baixo",
-    riskColor: "text-solana-green",
-    description: "Stake SOL em validators via liquid staking tokens",
-    icon: "🔒",
-    tvl: "$2.4B",
-    badge: "Popular",
-    badgeColor: "bg-solana-green/20 text-solana-green",
+    id: "kamino",
+    name: "Kamino",
+    logo: "K",
+    category: "Lending",
+    tvl: "$1.8B",
+    apy: "5.2%",
+    description: "Empréstimos e depósitos em cripto",
+    gradient: "linear-gradient(135deg, #9945FF, #C084FC)",
   },
   {
-    name: "USDC Lending",
-    protocol: "Kamino Finance",
-    apy: "8-12%",
-    risk: "Médio",
-    riskColor: "text-yellow-400",
-    description: "Empreste USDC para market makers e traders alavancados",
-    icon: "🏦",
-    tvl: "$890M",
-    badge: "Alto rendimento",
-    badgeColor: "bg-yellow-400/20 text-yellow-400",
+    id: "jito",
+    name: "Jito",
+    logo: "J",
+    category: "Staking",
+    tvl: "$2.1B",
+    apy: "7.8%",
+    description: "Staking líquido de SOL com MEV",
+    gradient: "linear-gradient(135deg, #14F195, #00C2FF)",
   },
   {
-    name: "SOL/USDC LP",
-    protocol: "Orca Whirlpool",
-    apy: "15-25%",
-    risk: "Alto",
-    riskColor: "text-red-400",
-    description: "Forneça liquidez concentrada e receba taxas de swap",
-    icon: "🌊",
-    tvl: "$340M",
-    badge: "Maior APY",
-    badgeColor: "bg-red-400/20 text-red-400",
+    id: "drift",
+    name: "Drift",
+    logo: "D",
+    category: "Perps",
+    tvl: "$850M",
+    description: "Trading de perpétuos descentralizado",
+    gradient: "linear-gradient(135deg, #6366F1, #8B5CF6)",
   },
+  {
+    id: "marginfi",
+    name: "MarginFi",
+    logo: "M",
+    category: "Lending",
+    tvl: "$650M",
+    apy: "4.9%",
+    description: "Protocolo de lending e borrowing",
+    gradient: "linear-gradient(135deg, #EC4899, #F43F5E)",
+  },
+  {
+    id: "perena",
+    name: "Perena",
+    logo: "P",
+    category: "Stablecoin",
+    tvl: "$120M",
+    apy: "8.5%",
+    description: "Yield com stablecoins",
+    gradient: "linear-gradient(135deg, #F4C009, #FF6B2B)",
+  },
+  {
+    id: "meteora",
+    name: "Meteora",
+    logo: "Mt",
+    category: "LP",
+    tvl: "$420M",
+    apy: "12.3%",
+    description: "Pools de liquidez dinâmicas",
+    gradient: "linear-gradient(135deg, #00C2FF, #14F195)",
+  },
+  {
+    id: "raydium",
+    name: "Raydium",
+    logo: "R",
+    category: "DEX",
+    tvl: "$950M",
+    apy: "9.1%",
+    description: "AMM e pools concentradas",
+    gradient: "linear-gradient(135deg, #7C3AED, #4F46E5)",
+  },
+  {
+    id: "orca",
+    name: "Orca",
+    logo: "O",
+    category: "DEX",
+    tvl: "$380M",
+    apy: "11.5%",
+    description: "Pools concentradas (CLMM)",
+    gradient: "linear-gradient(135deg, #FF6B2B, #F4C009)",
+  },
+];
+
+const CATEGORIES = [
+  "Todos",
+  "Lending",
+  "Staking",
+  "DEX",
+  "LP",
+  "Perps",
+  "Stablecoin",
 ];
 
 export default function DeFiPage() {
@@ -70,155 +129,214 @@ export default function DeFiPage() {
   const wallet = wallets[0];
   const { data: solBalance = 0 } = useWalletBalance(wallet?.address);
 
+  const [category, setCategory] = useState("Todos");
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<string | null>(null);
+
   useEffect(() => {
     if (ready && !authenticated) router.replace("/");
   }, [ready, authenticated, router]);
 
+  const filtered = PROTOCOLS.filter((p) => {
+    const matchCat = category === "Todos" || p.category === category;
+    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());
+    return matchCat && matchSearch;
+  });
+
+  const selectedProtocol = PROTOCOLS.find((p) => p.id === selected) ?? null;
+
   return (
-    <main className="min-h-dvh flex flex-col pb-24">
+    <main className="relative min-h-dvh flex flex-col pb-32 bg-brand-beige overflow-x-hidden">
+      {/* Decorative blobs */}
+      <div
+        className="pointer-events-none absolute -top-24 -right-24 w-72 h-72 rounded-full opacity-30"
+        style={{
+          background: "radial-gradient(circle, #9945FF 0%, transparent 70%)",
+        }}
+      />
+      <div
+        className="pointer-events-none absolute top-[55%] -left-20 w-56 h-56 rounded-full opacity-20"
+        style={{
+          background: "radial-gradient(circle, #FF6B2B 0%, transparent 70%)",
+        }}
+      />
+
       {/* Header */}
-      <div className="px-5 pt-12 pb-4">
-        <h1 className="font-display text-2xl font-bold text-white">
-          Rendimento DeFi
+      <div className="relative z-10 px-5 pt-14 pb-4">
+        <p className="text-brand-muted text-xs font-medium">Solana DeFi</p>
+        <h1 className="font-display text-2xl font-bold text-brand-ink">
+          Investir
         </h1>
-        <p className="text-white/40 text-sm mt-1">
-          Faça seu saldo trabalhar para você
-        </p>
       </div>
 
-      {/* Portfolio summary */}
-      <motion.div
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="mx-5 mb-6 rounded-3xl p-5 border border-solana-green/20"
+      {/* Portfolio card */}
+      <div
+        className="relative z-10 mx-5 mb-5 rounded-3xl p-5 overflow-hidden border border-brand-border animate-fade-in"
         style={{
-          background: "linear-gradient(135deg, #0D1A12 0%, #111820 100%)",
+          background: "linear-gradient(135deg, #FFFFFF 0%, #F3EEFF 100%)",
+          boxShadow: "0 4px 24px rgba(153,69,255,0.08)",
         }}
       >
-        <div className="flex items-center justify-between mb-4">
+        <div
+          className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-30"
+          style={{
+            background: "radial-gradient(circle, #9945FF 0%, transparent 70%)",
+            transform: "translate(30%, -30%)",
+          }}
+        />
+        <div className="relative flex items-start justify-between">
           <div>
-            <p className="text-white/40 text-xs mb-1">Depositado em DeFi</p>
-            <p className="font-display text-3xl font-bold text-white">$0.00</p>
-            <p className="text-white/30 text-xs mt-0.5">0.000 SOL</p>
+            <p className="text-brand-muted text-xs uppercase tracking-wider mb-1">
+              Depositado em DeFi
+            </p>
+            <p className="font-display text-3xl font-bold text-brand-ink">
+              $0.00
+            </p>
+            <p className="text-brand-muted text-xs mt-0.5">0.000 SOL</p>
           </div>
           <div className="text-right">
-            <p className="text-white/40 text-xs mb-1">Rendimento acumulado</p>
-            <p className="text-solana-green font-semibold text-lg">+$0.00</p>
+            <p className="text-brand-muted text-xs uppercase tracking-wider mb-1">
+              Rendimento
+            </p>
+            <p className="font-semibold text-lg" style={{ color: "#F4C009" }}>
+              +$0.00
+            </p>
           </div>
         </div>
-
-        <div className="flex items-center gap-2 text-xs text-white/40">
-          <TrendingUp className="w-3.5 h-3.5" />
-          <span>Disponível para depositar: {solBalance.toFixed(4)} SOL</span>
+        <div className="relative mt-4 flex items-center gap-1.5 bg-brand-purple-muted rounded-full px-3 py-1.5 w-fit border border-brand-border">
+          <TrendingUp className="w-3.5 h-3.5 text-brand-purple" />
+          <span className="text-xs text-brand-ink-soft font-medium">
+            Disponível: {solBalance.toFixed(4)} SOL
+          </span>
         </div>
-      </motion.div>
+      </div>
 
-      {/* Features strip */}
-      <div className="px-5 mb-6 grid grid-cols-3 gap-3">
+      {/* Feature pills */}
+      <div className="relative z-10 px-5 mb-5 flex gap-2">
         {[
-          { icon: <Shield className="w-4 h-4" />, label: "Auditado" },
-          { icon: <Zap className="w-4 h-4" />, label: "Automático" },
-          { icon: <ArrowUpRight className="w-4 h-4" />, label: "Saque livre" },
+          { icon: <Shield className="w-3.5 h-3.5" />, label: "Auditado" },
+          { icon: <Zap className="w-3.5 h-3.5" />, label: "Automático" },
+          {
+            icon: <ArrowUpRight className="w-3.5 h-3.5" />,
+            label: "Saque livre",
+          },
         ].map(({ icon, label }) => (
           <div
             key={label}
-            className="flex flex-col items-center gap-1.5 bg-bg-card border border-bg-border rounded-2xl p-3"
+            className="flex-1 flex items-center justify-center gap-1.5 bg-white rounded-full py-2 px-3 border border-brand-border"
           >
-            <span className="text-solana-purple">{icon}</span>
-            <span className="text-white/60 text-xs">{label}</span>
+            <span className="text-brand-purple">{icon}</span>
+            <span className="text-brand-ink-soft text-xs font-medium">
+              {label}
+            </span>
           </div>
         ))}
       </div>
 
-      {/* Strategy cards */}
-      <div className="px-5 space-y-4">
-        <h2 className="text-white/50 text-sm font-medium">Estratégias</h2>
+      {/* Search */}
+      <div className="relative z-10 px-5 mb-4">
+        <div className="relative">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-muted" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar protocolo..."
+            className="w-full bg-white border border-brand-border rounded-2xl pl-10 pr-4 py-3 text-sm text-brand-ink placeholder:text-brand-muted focus:outline-none focus:border-brand-purple/50 transition-colors"
+          />
+        </div>
+      </div>
 
-        {STRATEGIES.map((s, i) => (
-          <motion.div
-            key={s.name}
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.08 }}
-            className="bg-bg-card border border-bg-border rounded-3xl p-5"
+      {/* Category pills */}
+      <div className="relative z-10 flex gap-2 overflow-x-auto pb-2 -mx-0 px-5 scrollbar-hide mb-2">
+        {CATEGORIES.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setCategory(cat)}
+            className={`shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold transition-all border ${
+              category === cat
+                ? "bg-brand-purple text-white border-brand-purple shadow-sm"
+                : "bg-white text-brand-muted border-brand-border"
+            }`}
           >
-            <div className="flex items-start justify-between mb-3">
-              <div className="flex items-center gap-3">
-                <span className="text-2xl">{s.icon}</span>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-white font-semibold text-sm">{s.name}</p>
-                    <span
-                      className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${s.badgeColor}`}
-                    >
-                      {s.badge}
-                    </span>
-                  </div>
-                  <p className="text-white/40 text-xs">{s.protocol}</p>
-                </div>
-              </div>
-              <div className="text-right">
-                <p className="text-solana-green font-bold text-lg">{s.apy}</p>
-                <p className="text-white/30 text-xs">ao ano</p>
-              </div>
-            </div>
-
-            <p className="text-white/50 text-xs mb-4 leading-relaxed">
-              {s.description}
-            </p>
-
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-4 text-xs text-white/40">
-                <span>
-                  Risco:{" "}
-                  <span className={`font-medium ${s.riskColor}`}>{s.risk}</span>
-                </span>
-                <span>TVL: {s.tvl}</span>
-              </div>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => {}}
-                className="text-xs h-8"
-              >
-                Depositar
-              </Button>
-            </div>
-          </motion.div>
+            {cat}
+          </button>
         ))}
       </div>
 
-      {/* Coming soon banner */}
-      <div className="mx-5 mt-6 mb-2 rounded-2xl bg-solana-purple/10 border border-solana-purple/20 p-4 text-center">
-        <p className="text-solana-purple text-sm font-medium">
-          DeFi integrations em breve
-        </p>
-        <p className="text-white/40 text-xs mt-1">
-          Kamino, Orca e Jito em integração
-        </p>
-      </div>
-
-      {/* Bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 max-w-[430px] mx-auto">
-        <div className="bg-bg/80 backdrop-blur-xl border-t border-bg-border px-5 py-3 flex justify-around">
-          {[
-            { label: "Carteira", icon: "💰", href: "/wallet", active: false },
-            { label: "Enviar", icon: "📤", href: "/send", active: false },
-            { label: "DeFi", icon: "📈", href: "/defi", active: true },
-            { label: "Config", icon: "⚙️", href: "/settings", active: false },
-          ].map(({ label, icon, href, active }) => (
+      {/* Protocol grid */}
+      <div className="relative z-10 px-5 mt-3">
+        <div className="grid grid-cols-2 gap-3">
+          {filtered.map((proto) => (
             <button
-              key={label}
-              onClick={() => router.push(href)}
-              className={`flex flex-col items-center gap-1 px-3 py-1 rounded-xl transition-all
-                ${active ? "text-solana-purple" : "text-white/30"}`}
+              key={proto.id}
+              onClick={() => setSelected(proto.id)}
+              className="text-left p-4 rounded-3xl bg-white border border-brand-border hover:border-brand-purple/30 transition-all active:scale-[0.97] group animate-fade-in"
+              style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.04)" }}
             >
-              <span className="text-lg">{icon}</span>
-              <span className="text-[10px] font-medium">{label}</span>
+              {/* Logo */}
+              <div
+                className="w-10 h-10 rounded-2xl flex items-center justify-center text-white font-bold text-sm mb-3"
+                style={{ background: proto.gradient }}
+              >
+                {proto.logo}
+              </div>
+
+              <p className="text-sm font-bold text-brand-ink leading-tight">
+                {proto.name}
+              </p>
+              <p className="text-[11px] text-brand-muted mt-0.5 line-clamp-1">
+                {proto.description}
+              </p>
+
+              <div className="flex items-center justify-between mt-3 pt-3 border-t border-brand-border/60">
+                <div>
+                  <p className="text-[9px] text-brand-muted uppercase tracking-wide">
+                    TVL
+                  </p>
+                  <p className="text-xs font-bold text-brand-ink">
+                    {proto.tvl}
+                  </p>
+                </div>
+                {proto.apy && (
+                  <div className="flex items-center gap-0.5">
+                    <TrendingUp className="w-3 h-3 text-brand-gold" />
+                    <span className="text-xs font-bold text-brand-gold">
+                      {proto.apy}
+                    </span>
+                  </div>
+                )}
+              </div>
             </button>
           ))}
         </div>
-      </nav>
+
+        {filtered.length === 0 && (
+          <div className="text-center py-12">
+            <p className="text-brand-muted text-sm">
+              Nenhum protocolo encontrado
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Modals */}
+      <KaminoModal
+        open={selected === "kamino"}
+        onClose={() => setSelected(null)}
+      />
+      <OrcaModal open={selected === "orca"} onClose={() => setSelected(null)} />
+      <JitoModal open={selected === "jito"} onClose={() => setSelected(null)} />
+      {selectedProtocol &&
+        !["kamino", "orca", "jito"].includes(selected ?? "") && (
+          <GenericProtocolModal
+            open={!!selected}
+            onClose={() => setSelected(null)}
+            protocol={selectedProtocol}
+          />
+        )}
+
+      <BottomNav />
     </main>
   );
 }

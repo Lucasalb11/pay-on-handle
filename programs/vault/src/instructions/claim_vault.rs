@@ -1,6 +1,9 @@
 use crate::{
     errors::VaultError,
-    state::{PaymentVault, VaultStatus, NATIVE_SOL_MINT},
+    state::{
+        PaymentVault, VaultStatus, HR_DEST_WALLET_OFFSET, HR_VERIFIED_OFFSET, NATIVE_SOL_MINT,
+        REGISTRY_PROGRAM_ID,
+    },
 };
 use anchor_lang::prelude::*;
 
@@ -8,9 +11,8 @@ use anchor_spl::associated_token::AssociatedToken;
 use anchor_spl::token::Mint;
 use anchor_spl::token::{self, CloseAccount, Token, TokenAccount, Transfer as SplTransfer};
 
-/// Claim a SOL vault. Claimer proves ownership of the handle via
-/// (a) having the wallet registered in the Registry, or (b) providing proof_data
-/// validated off-chain by the relayer before submitting this tx.
+/// Claim a SOL vault. `handle_record` must be the HandleRecord PDA owned by
+/// the registry program, with `destination_wallet == claimer`.
 #[derive(Accounts)]
 pub struct ClaimSolVault<'info> {
     #[account(
@@ -21,6 +23,10 @@ pub struct ClaimSolVault<'info> {
         constraint = vault.mint == NATIVE_SOL_MINT @ VaultError::UnsupportedMint,
     )]
     pub vault: Account<'info, PaymentVault>,
+
+    /// CHECK: validated in handler — PDA owned by registry, destination_wallet == claimer
+    #[account(owner = REGISTRY_PROGRAM_ID @ VaultError::InvalidHandleRecord)]
+    pub handle_record: UncheckedAccount<'info>,
 
     #[account(mut)]
     pub claimer: Signer<'info>,
@@ -43,6 +49,36 @@ pub fn claim_sol_vault_handler(
         vault.recipient_handle_hash == recipient_handle_hash,
         VaultError::HandleMismatch
     );
+
+    // Guard: handle_record PDA must derive from the vault's stored target.
+    let (expected_pda, _) = Pubkey::find_program_address(
+        &[
+            b"handle",
+            &[vault.recipient_platform],
+            vault.recipient_handle_hash.as_ref(),
+        ],
+        &REGISTRY_PROGRAM_ID,
+    );
+    require!(
+        ctx.accounts.handle_record.key() == expected_pda,
+        VaultError::InvalidHandleRecord
+    );
+
+    // Guard: handle must be verified and destination_wallet must equal claimer.
+    let hr = ctx.accounts.handle_record.try_borrow_data()?;
+    require!(
+        hr.len() > HR_VERIFIED_OFFSET,
+        VaultError::InvalidHandleRecord
+    );
+    require!(hr[HR_VERIFIED_OFFSET] == 1, VaultError::HandleNotVerified);
+    let dest_bytes: [u8; 32] = hr[HR_DEST_WALLET_OFFSET..HR_DEST_WALLET_OFFSET + 32]
+        .try_into()
+        .map_err(|_| error!(VaultError::InvalidHandleRecord))?;
+    require!(
+        Pubkey::from(dest_bytes) == ctx.accounts.claimer.key(),
+        VaultError::Unauthorized
+    );
+    drop(hr);
 
     let amount = vault.amount;
 
@@ -97,6 +133,10 @@ pub struct ClaimSplVault<'info> {
     )]
     pub claimer_token_account: Account<'info, TokenAccount>,
 
+    /// CHECK: validated in handler — PDA owned by registry, destination_wallet == claimer
+    #[account(owner = REGISTRY_PROGRAM_ID @ VaultError::InvalidHandleRecord)]
+    pub handle_record: UncheckedAccount<'info>,
+
     #[account(mut)]
     pub claimer: Signer<'info>,
 
@@ -117,6 +157,36 @@ pub fn claim_spl_vault_handler(
         vault.recipient_handle_hash == recipient_handle_hash,
         VaultError::HandleMismatch
     );
+
+    // Guard: handle_record PDA must derive from the vault's stored target.
+    let (expected_pda, _) = Pubkey::find_program_address(
+        &[
+            b"handle",
+            &[vault.recipient_platform],
+            vault.recipient_handle_hash.as_ref(),
+        ],
+        &REGISTRY_PROGRAM_ID,
+    );
+    require!(
+        ctx.accounts.handle_record.key() == expected_pda,
+        VaultError::InvalidHandleRecord
+    );
+
+    // Guard: handle must be verified and destination_wallet must equal claimer.
+    let hr = ctx.accounts.handle_record.try_borrow_data()?;
+    require!(
+        hr.len() > HR_VERIFIED_OFFSET,
+        VaultError::InvalidHandleRecord
+    );
+    require!(hr[HR_VERIFIED_OFFSET] == 1, VaultError::HandleNotVerified);
+    let dest_bytes: [u8; 32] = hr[HR_DEST_WALLET_OFFSET..HR_DEST_WALLET_OFFSET + 32]
+        .try_into()
+        .map_err(|_| error!(VaultError::InvalidHandleRecord))?;
+    require!(
+        Pubkey::from(dest_bytes) == ctx.accounts.claimer.key(),
+        VaultError::Unauthorized
+    );
+    drop(hr);
 
     let amount = vault.amount;
     let vault_nonce = vault.vault_nonce;

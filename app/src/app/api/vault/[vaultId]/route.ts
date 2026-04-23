@@ -4,11 +4,8 @@ import { RPC_ENDPOINT, VAULT_PROGRAM_ID } from "@/lib/constants";
 
 const connection = new Connection(RPC_ENDPOINT, "confirmed");
 
-const VAULT_DISCRIMINATOR = Buffer.from([
-  // sha256("account:PaymentVault")[0..8] — computed by Anchor
-  // Placeholder: real value generated at build time from IDL
-  0x91, 0x5e, 0x07, 0x03, 0x2a, 0xe4, 0xd3, 0x12,
-]);
+// sha256("account:PaymentVault")[0..8] from IDL
+const VAULT_DISCRIMINATOR = Buffer.from([198, 111, 51, 64, 219, 236, 208, 239]);
 
 export async function GET(
   _req: NextRequest,

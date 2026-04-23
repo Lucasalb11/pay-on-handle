@@ -30,4 +30,8 @@ pub enum VaultError {
     InvalidClaimPeriod,
     #[msg("Invalid fee basis points (max 1000 = 10%)")]
     InvalidFeeBps,
+    #[msg("Handle record does not match vault target or is invalid")]
+    InvalidHandleRecord,
+    #[msg("Handle has not been verified")]
+    HandleNotVerified,
 }

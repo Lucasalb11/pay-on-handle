@@ -4,19 +4,27 @@ import { usePrivy, useSolanaWallets } from "@privy-io/react-auth";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
-import { CheckCircle, Clock, ArrowRight } from "lucide-react";
+import { CheckCircle, Clock, ArrowRight, AlertCircle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { hashHandleHex } from "@/lib/handle";
 
 interface VaultInfo {
   sender: string;
   recipientHandleHash: string;
+  recipientPlatform: number;
   amount: number;
   mint: string;
   status: string;
   createdAt: number;
   expiresAt: number;
   vaultId: string;
+}
+
+interface PriceInfo {
+  sol_usd: number;
+  sol_brl: number;
+  usdc_brl: number;
 }
 
 function useVaultInfo(vaultId: string) {
@@ -31,6 +39,19 @@ function useVaultInfo(vaultId: string) {
   });
 }
 
+function usePrices() {
+  return useQuery<PriceInfo>({
+    queryKey: ["prices"],
+    queryFn: async () => {
+      const res = await fetch("/api/prices");
+      if (!res.ok) return { sol_usd: 150, sol_brl: 765, usdc_brl: 5.1 };
+      return res.json();
+    },
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
 function daysLeft(expiresAt: number): number {
   const now = Math.floor(Date.now() / 1000);
   return Math.max(0, Math.floor((expiresAt - now) / 86400));
@@ -40,9 +61,8 @@ function formatSol(lamports: number): string {
   return (lamports / 1e9).toFixed(4).replace(/\.?0+$/, "");
 }
 
-function formatBrl(lamports: number): string {
-  const usd = (lamports / 1e9) * 150;
-  const brl = usd * 5.1;
+function formatBrl(lamports: number, solBrl: number): string {
+  const brl = (lamports / 1e9) * solBrl;
   return brl.toLocaleString("pt-BR", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
@@ -55,38 +75,53 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
   const { ready, authenticated, login } = usePrivy();
   const { wallets } = useSolanaWallets();
   const [step, setStep] = useState<ClaimStep>("intro");
+  const [handle, setHandle] = useState("");
   const [pixKey, setPixKey] = useState("");
   const [loading, setLoading] = useState(false);
   const [txSig, setTxSig] = useState("");
 
   const { data: vault, isLoading, error } = useVaultInfo(vaultId);
+  const { data: prices } = usePrices();
+
+  const solBrl = prices?.sol_brl ?? 765;
+
+  // Client-side handle validation against vault hash
+  const handleHashMatches =
+    handle.trim().length > 0 && vault
+      ? hashHandleHex(handle) === vault.recipientHandleHash
+      : null;
 
   async function claimCrypto() {
-    if (!wallets[0]) {
+    if (!vault || !handleHashMatches) return;
+
+    if (!authenticated || !wallets[0]) {
       await login();
       return;
     }
+
     setLoading(true);
     try {
       const res = await fetch("/api/claim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          claimant: wallets[0].address,
           vaultId,
-          claimerAddress: wallets[0].address,
+          handle,
         }),
       });
+
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.message ?? "Claim failed");
+        throw new Error(err.error ?? "Claim failed");
       }
-      const { txBase64 } = await res.json();
+
+      const { transaction } = await res.json();
 
       const { Transaction } = await import("@solana/web3.js");
       const { connection } = await import("@/lib/solana");
-      const signedTx = await wallets[0].signTransaction(
-        Transaction.from(Buffer.from(txBase64, "base64"))
-      );
+      const tx = Transaction.from(Buffer.from(transaction, "base64"));
+      const signedTx = await wallets[0].signTransaction(tx);
       const sig = await connection.sendRawTransaction(signedTx.serialize());
       await connection.confirmTransaction(sig, "confirmed");
 
@@ -100,18 +135,36 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
   }
 
   async function claimViaPix() {
-    if (!pixKey.trim()) return;
+    if (!vault || !handleHashMatches || !pixKey.trim()) return;
     setLoading(true);
     try {
       const res = await fetch("/api/claim-pix", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ vaultId, pixKey }),
+        body: JSON.stringify({ vaultId, handle, pixKey }),
       });
+
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.message ?? "PIX claim failed");
+        throw new Error(err.error ?? "PIX claim failed");
       }
+
+      const data = await res.json();
+
+      // PIX flow: sign claim tx, then server handles Jupiter swap + PIX
+      if (data.transaction) {
+        if (!authenticated || !wallets[0]) {
+          await login();
+          return;
+        }
+        const { Transaction } = await import("@solana/web3.js");
+        const { connection } = await import("@/lib/solana");
+        const tx = Transaction.from(Buffer.from(data.transaction, "base64"));
+        const signedTx = await wallets[0].signTransaction(tx);
+        const sig = await connection.sendRawTransaction(signedTx.serialize());
+        await connection.confirmTransaction(sig, "confirmed");
+      }
+
       setStep("success");
     } catch (err: any) {
       toast.error(err.message ?? "Erro ao processar PIX");
@@ -158,10 +211,11 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
     );
   }
 
+  const PLATFORM_LABELS = ["Instagram", "X (Twitter)", "WhatsApp"];
+
   return (
     <main className="min-h-dvh flex flex-col px-5 py-12">
       <AnimatePresence mode="wait">
-        {/* Intro: show the payment */}
         {step === "intro" && (
           <motion.div
             key="intro"
@@ -176,11 +230,11 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
                 Você recebeu um pagamento!
               </h1>
               <p className="text-white/50 text-sm">
-                de {vault.sender.slice(0, 4)}...{vault.sender.slice(-4)}
+                via {vault.sender.slice(0, 4)}...{vault.sender.slice(-4)} no{" "}
+                {PLATFORM_LABELS[vault.recipientPlatform] ?? "Solana"}
               </p>
             </div>
 
-            {/* Amount */}
             <div
               className="w-full rounded-3xl p-6 flex flex-col items-center gap-1"
               style={{
@@ -190,14 +244,13 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
               }}
             >
               <p className="font-display text-5xl font-bold text-white">
-                R$ {formatBrl(vault.amount)}
+                R$ {formatBrl(vault.amount, solBrl)}
               </p>
               <p className="text-white/50 text-sm">
                 {formatSol(vault.amount)} SOL
               </p>
             </div>
 
-            {/* Expiry */}
             <div className="flex items-center gap-2 text-white/40 text-sm">
               <Clock className="w-4 h-4" />
               <span>
@@ -218,7 +271,6 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
           </motion.div>
         )}
 
-        {/* Choose: crypto wallet or PIX */}
         {step === "choose" && (
           <motion.div
             key="choose"
@@ -232,11 +284,11 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
                 Como você quer receber?
               </h2>
               <p className="text-white/40 text-sm">
-                R$ {formatBrl(vault.amount)} · {formatSol(vault.amount)} SOL
+                R$ {formatBrl(vault.amount, solBrl)} · {formatSol(vault.amount)}{" "}
+                SOL
               </p>
             </div>
 
-            {/* Crypto option */}
             <motion.button
               whileTap={{ scale: 0.98 }}
               onClick={() => setStep("crypto")}
@@ -256,7 +308,6 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
               </div>
             </motion.button>
 
-            {/* PIX option */}
             <motion.button
               whileTap={{ scale: 0.98 }}
               onClick={() => setStep("pix")}
@@ -282,42 +333,81 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
           </motion.div>
         )}
 
-        {/* Crypto claim */}
         {step === "crypto" && (
           <motion.div
             key="crypto"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
-            className="flex flex-col items-center gap-6 text-center"
+            className="flex flex-col items-center gap-6"
           >
-            <div className="text-5xl">🔐</div>
-            <div>
+            <div className="text-center">
+              <div className="text-5xl mb-3">🔐</div>
               <h2 className="font-display text-2xl font-bold text-white mb-2">
-                Criar conta e receber
+                Confirme seu @handle
               </h2>
               <p className="text-white/50 text-sm">
-                Entre com Google ou Apple. Sua wallet é criada automaticamente —
-                sem seed phrases.
+                Informe o mesmo handle para o qual este pagamento foi enviado.
               </p>
             </div>
 
-            <div className="w-full bg-bg-card border border-bg-border rounded-2xl p-4 text-left space-y-2">
+            <div className="w-full">
+              <label className="text-white/50 text-sm mb-2 block">
+                Seu @handle ({PLATFORM_LABELS[vault.recipientPlatform]})
+              </label>
+              <input
+                type="text"
+                value={handle}
+                onChange={(e) => setHandle(e.target.value)}
+                placeholder="@seu_usuario"
+                className="w-full bg-bg-card border border-bg-border rounded-2xl px-4 py-3.5 text-white placeholder:text-white/30 text-sm outline-none focus:border-solana-purple/60 transition-colors"
+              />
+              {handle.trim().length > 0 && handleHashMatches === false && (
+                <p className="text-red-400 text-xs mt-1.5 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Handle não corresponde a este pagamento
+                </p>
+              )}
+              {handleHashMatches === true && (
+                <p className="text-solana-green text-xs mt-1.5 flex items-center gap-1">
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  Handle confirmado!
+                </p>
+              )}
+            </div>
+
+            <div className="w-full bg-bg-card border border-bg-border rounded-2xl p-4 space-y-2">
               <Row
                 label="Você recebe"
                 value={`${formatSol(vault.amount)} SOL`}
+              />
+              <Row
+                label="≈ em reais"
+                value={`R$ ${formatBrl(vault.amount, solBrl)}`}
               />
               <Row label="Rede" value="Solana" />
               <Row label="Tempo estimado" value="~5 segundos" />
             </div>
 
-            <Button fullWidth size="lg" loading={loading} onClick={claimCrypto}>
+            <Button
+              fullWidth
+              size="lg"
+              loading={loading}
+              disabled={!handleHashMatches}
+              onClick={claimCrypto}
+            >
               {authenticated ? "Resgatar SOL" : "Entrar e resgatar"}
             </Button>
+
+            <button
+              onClick={() => setStep("choose")}
+              className="text-white/40 text-sm"
+            >
+              ← Voltar
+            </button>
           </motion.div>
         )}
 
-        {/* PIX claim */}
         {step === "pix" && (
           <motion.div
             key="pix"
@@ -332,9 +422,34 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
                 Receber via PIX
               </h2>
               <p className="text-white/50 text-sm">
-                Informe sua chave PIX e receba R$ {formatBrl(vault.amount)}{" "}
-                direto na sua conta.
+                Informe seu @handle e chave PIX para receber R${" "}
+                {formatBrl(vault.amount, solBrl)}.
               </p>
+            </div>
+
+            <div>
+              <label className="text-white/50 text-sm mb-2 block">
+                Seu @handle ({PLATFORM_LABELS[vault.recipientPlatform]})
+              </label>
+              <input
+                type="text"
+                value={handle}
+                onChange={(e) => setHandle(e.target.value)}
+                placeholder="@seu_usuario"
+                className="w-full bg-bg-card border border-bg-border rounded-2xl px-4 py-3.5 text-white placeholder:text-white/30 text-sm outline-none focus:border-solana-green/60 transition-colors"
+              />
+              {handle.trim().length > 0 && handleHashMatches === false && (
+                <p className="text-red-400 text-xs mt-1.5 flex items-center gap-1">
+                  <AlertCircle className="w-3.5 h-3.5" />
+                  Handle não corresponde a este pagamento
+                </p>
+              )}
+              {handleHashMatches === true && (
+                <p className="text-solana-green text-xs mt-1.5 flex items-center gap-1">
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  Handle confirmado!
+                </p>
+              )}
             </div>
 
             <div>
@@ -352,8 +467,7 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
 
             <div className="bg-solana-green/10 border border-solana-green/30 rounded-2xl p-4">
               <p className="text-white/70 text-sm">
-                🔄 Conversão automática: SOL → USDC via Jupiter → BRL via
-                OpenPix
+                🔄 SOL → USDC via Jupiter → BRL via BRLA · Tempo estimado: ~60s
               </p>
             </div>
 
@@ -361,15 +475,21 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
               fullWidth
               size="lg"
               loading={loading}
-              disabled={!pixKey.trim()}
+              disabled={!handleHashMatches || !pixKey.trim()}
               onClick={claimViaPix}
             >
-              Receber R$ {formatBrl(vault.amount)}
+              Receber R$ {formatBrl(vault.amount, solBrl)}
             </Button>
+
+            <button
+              onClick={() => setStep("choose")}
+              className="text-white/40 text-sm text-center"
+            >
+              ← Voltar
+            </button>
           </motion.div>
         )}
 
-        {/* Success */}
         {step === "success" && (
           <motion.div
             key="success"
@@ -394,10 +514,22 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
                 {txSig
                   ? `${formatSol(vault.amount)} SOL enviado para sua wallet`
                   : `R$ ${formatBrl(
-                      vault.amount
+                      vault.amount,
+                      solBrl
                     )} sendo enviado para sua chave PIX`}
               </p>
             </div>
+
+            {txSig && (
+              <a
+                href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-solana-purple text-sm underline"
+              >
+                Ver transação no Explorer
+              </a>
+            )}
 
             <p className="text-white/20 text-xs">
               Powered by Solana · Paga no @

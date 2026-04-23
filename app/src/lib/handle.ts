@@ -1,4 +1,6 @@
 import { createHash } from "crypto";
+import { PublicKey } from "@solana/web3.js";
+import { REGISTRY_PROGRAM_ID } from "./constants";
 
 /** Normalize a handle: lowercase, strip leading @, trim whitespace. */
 export function normalizeHandle(raw: string): string {
@@ -14,6 +16,18 @@ export function hashHandle(raw: string): Uint8Array {
 
 export function hashHandleHex(raw: string): string {
   return Buffer.from(hashHandle(raw)).toString("hex");
+}
+
+/** Derive the HandleRecord PDA for a given platform + handle hash. */
+export function handleRecordPda(
+  platform: number,
+  handleHash: Uint8Array
+): PublicKey {
+  const [pda] = PublicKey.findProgramAddressSync(
+    [Buffer.from("handle"), Buffer.from([platform]), Buffer.from(handleHash)],
+    new PublicKey(REGISTRY_PROGRAM_ID)
+  );
+  return pda;
 }
 
 /** Format a handle for display — always shows leading @. */
