@@ -266,22 +266,24 @@ export async function POST(req: NextRequest) {
     if (event.type === "VaultClaimed") {
       const vaultNonce = (event.data as { vault_id?: string }).vault_id;
       if (vaultNonce) {
-        const intent = getPixIntent(vaultNonce);
-        if (intent) {
-          dispatchPix(vaultNonce, intent.pixKey, intent.brlCents)
-            .then(() => {
-              deletePixIntent(vaultNonce);
-              console.log(
-                `[PIX] Dispatched ${intent.brlCents} centavos → ${intent.pixKey} (vault ${vaultNonce})`
-              );
-            })
-            .catch((err) => {
-              console.error(
-                `[PIX] Dispatch failed for vault ${vaultNonce}:`,
-                err
-              );
-            });
-        }
+        getPixIntent(vaultNonce)
+          .then((intent) => {
+            if (!intent) return;
+            return dispatchPix(vaultNonce, intent.pixKey, intent.brlCents).then(
+              () => {
+                deletePixIntent(vaultNonce);
+                console.log(
+                  `[PIX] Dispatched ${intent.brlCents} centavos → ${intent.pixKey} (vault ${vaultNonce})`
+                );
+              }
+            );
+          })
+          .catch((err) => {
+            console.error(
+              `[PIX] Dispatch failed for vault ${vaultNonce}:`,
+              err
+            );
+          });
       }
     }
   }

@@ -29,10 +29,18 @@ export async function GET(req: NextRequest) {
   url.searchParams.set("slippageBps", slippageBps);
   url.searchParams.set("onlyDirectRoutes", "false");
 
-  const res = await fetch(url.toString(), {
-    headers: { Accept: "application/json" },
-    next: { revalidate: 10 },
-  });
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), {
+      headers: { Accept: "application/json" },
+      next: { revalidate: 10 },
+    });
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: "Jupiter API unreachable", details: e?.message },
+      { status: 503 }
+    );
+  }
 
   if (!res.ok) {
     return NextResponse.json(

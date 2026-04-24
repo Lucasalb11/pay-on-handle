@@ -33,8 +33,8 @@ export function BottomNav() {
               aria-label={label}
               className={`flex flex-col items-center gap-1 px-5 py-2 rounded-xl transition-all ${
                 active
-                  ? "bg-solana-purple/15 text-solana-purple"
-                  : "text-white/30 hover:text-white/60"
+                  ? "bg-brand-orange/15 text-brand-orange"
+                  : "text-brand-muted hover:text-brand-ink-soft"
               }`}
             >
               <Icon className="w-5 h-5" />

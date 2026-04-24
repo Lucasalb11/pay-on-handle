@@ -11,6 +11,8 @@ const nextConfig = {
       tls: false,
       crypto: false,
     };
+    // Required for snarkjs WASM (used by @cloak.dev/sdk ZK proofs)
+    config.experiments = { ...config.experiments, asyncWebAssembly: true };
     return config;
   },
 };

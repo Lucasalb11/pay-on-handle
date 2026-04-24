@@ -85,7 +85,6 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
 
   const solBrl = prices?.sol_brl ?? 765;
 
-  // Client-side handle validation against vault hash
   const handleHashMatches =
     handle.trim().length > 0 && vault
       ? hashHandleHex(handle) === vault.recipientHandleHash
@@ -151,7 +150,6 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
 
       const data = await res.json();
 
-      // PIX flow: sign claim tx, then server handles Jupiter swap + PIX
       if (data.transaction) {
         if (!authenticated || !wallets[0]) {
           await login();
@@ -175,20 +173,20 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
 
   if (isLoading) {
     return (
-      <div className="min-h-dvh flex items-center justify-center">
-        <div className="w-8 h-8 border-2 border-solana-purple border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-dvh bg-brand-beige flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-brand-purple border-t-transparent rounded-full animate-spin" />
       </div>
     );
   }
 
   if (error || !vault) {
     return (
-      <div className="min-h-dvh flex flex-col items-center justify-center px-6 text-center gap-4">
+      <div className="min-h-dvh bg-brand-beige flex flex-col items-center justify-center px-6 text-center gap-4">
         <p className="text-4xl">😕</p>
-        <h1 className="font-display text-2xl font-bold text-white">
+        <h1 className="font-display text-2xl font-bold text-brand-ink">
           Pagamento não encontrado
         </h1>
-        <p className="text-white/50 text-sm">
+        <p className="text-brand-muted text-sm">
           Este link pode ter expirado ou já ter sido resgatado.
         </p>
       </div>
@@ -197,12 +195,12 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
 
   if (vault.status !== "pending") {
     return (
-      <div className="min-h-dvh flex flex-col items-center justify-center px-6 text-center gap-4">
+      <div className="min-h-dvh bg-brand-beige flex flex-col items-center justify-center px-6 text-center gap-4">
         <p className="text-4xl">{vault.status === "claimed" ? "✅" : "❌"}</p>
-        <h1 className="font-display text-2xl font-bold text-white">
+        <h1 className="font-display text-2xl font-bold text-brand-ink">
           {vault.status === "claimed" ? "Já resgatado" : "Pagamento encerrado"}
         </h1>
-        <p className="text-white/50 text-sm">
+        <p className="text-brand-muted text-sm">
           {vault.status === "claimed"
             ? "Este pagamento já foi resgatado."
             : "Este pagamento foi reembolsado ao remetente."}
@@ -214,7 +212,7 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
   const PLATFORM_LABELS = ["Instagram", "X (Twitter)", "WhatsApp"];
 
   return (
-    <main className="min-h-dvh flex flex-col px-5 py-12">
+    <main className="min-h-dvh bg-brand-beige flex flex-col px-5 py-12">
       <AnimatePresence mode="wait">
         {step === "intro" && (
           <motion.div
@@ -226,32 +224,32 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
           >
             <div className="text-6xl">🎁</div>
             <div>
-              <h1 className="font-display text-2xl font-bold text-white mb-1">
+              <h1 className="font-display text-2xl font-bold text-brand-ink mb-1">
                 Você recebeu um pagamento!
               </h1>
-              <p className="text-white/50 text-sm">
+              <p className="text-brand-muted text-sm">
                 via {vault.sender.slice(0, 4)}...{vault.sender.slice(-4)} no{" "}
                 {PLATFORM_LABELS[vault.recipientPlatform] ?? "Solana"}
               </p>
             </div>
 
             <div
-              className="w-full rounded-3xl p-6 flex flex-col items-center gap-1"
+              className="w-full rounded-3xl p-6 flex flex-col items-center gap-1 border"
               style={{
                 background:
-                  "linear-gradient(135deg, #9945FF22 0%, #14F19522 100%)",
-                border: "1px solid #9945FF44",
+                  "linear-gradient(135deg, rgba(255,107,43,0.08) 0%, rgba(153,69,255,0.08) 100%)",
+                borderColor: "rgba(255,107,43,0.25)",
               }}
             >
-              <p className="font-display text-5xl font-bold text-white">
+              <p className="font-display text-5xl font-bold text-brand-ink">
                 R$ {formatBrl(vault.amount, solBrl)}
               </p>
-              <p className="text-white/50 text-sm">
+              <p className="text-brand-muted text-sm">
                 {formatSol(vault.amount)} SOL
               </p>
             </div>
 
-            <div className="flex items-center gap-2 text-white/40 text-sm">
+            <div className="flex items-center gap-2 text-brand-muted text-sm">
               <Clock className="w-4 h-4" />
               <span>
                 {daysLeft(vault.expiresAt) > 0
@@ -265,7 +263,7 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
               <ArrowRight className="w-4 h-4" />
             </Button>
 
-            <p className="text-white/20 text-xs">
+            <p className="text-brand-muted/50 text-xs">
               Powered by Solana · Sem necessidade de wallet
             </p>
           </motion.div>
@@ -280,10 +278,10 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
             className="flex flex-col gap-4"
           >
             <div className="text-center mb-4">
-              <h2 className="font-display text-xl font-bold text-white mb-1">
+              <h2 className="font-display text-xl font-bold text-brand-ink mb-1">
                 Como você quer receber?
               </h2>
-              <p className="text-white/40 text-sm">
+              <p className="text-brand-muted text-sm">
                 R$ {formatBrl(vault.amount, solBrl)} · {formatSol(vault.amount)}{" "}
                 SOL
               </p>
@@ -292,42 +290,44 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
             <motion.button
               whileTap={{ scale: 0.98 }}
               onClick={() => setStep("crypto")}
-              className="w-full bg-bg-card border border-bg-border rounded-3xl p-5 text-left hover:border-solana-purple/50 transition-all"
+              className="w-full bg-white border border-brand-border rounded-3xl p-5 text-left hover:border-brand-purple/40 transition-all"
             >
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-solana-purple/20 flex items-center justify-center text-2xl">
+                <div className="w-12 h-12 rounded-2xl bg-brand-purple/10 flex items-center justify-center text-2xl">
                   🔐
                 </div>
                 <div>
-                  <p className="text-white font-semibold">Carteira Crypto</p>
-                  <p className="text-white/40 text-sm">
+                  <p className="text-brand-ink font-semibold">
+                    Carteira Crypto
+                  </p>
+                  <p className="text-brand-muted text-sm">
                     SOL direto na sua wallet · Login com Google
                   </p>
                 </div>
-                <ArrowRight className="w-4 h-4 text-white/30 ml-auto" />
+                <ArrowRight className="w-4 h-4 text-brand-muted ml-auto" />
               </div>
             </motion.button>
 
             <motion.button
               whileTap={{ scale: 0.98 }}
               onClick={() => setStep("pix")}
-              className="w-full bg-bg-card border border-bg-border rounded-3xl p-5 text-left hover:border-solana-green/50 transition-all"
+              className="w-full bg-white border border-brand-border rounded-3xl p-5 text-left hover:border-brand-orange/40 transition-all"
             >
               <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-2xl bg-solana-green/10 flex items-center justify-center text-2xl">
+                <div className="w-12 h-12 rounded-2xl bg-brand-orange/10 flex items-center justify-center text-2xl">
                   🏦
                 </div>
                 <div>
-                  <p className="text-white font-semibold">PIX</p>
-                  <p className="text-white/40 text-sm">
+                  <p className="text-brand-ink font-semibold">PIX</p>
+                  <p className="text-brand-muted text-sm">
                     Receba em reais · Direto na sua conta
                   </p>
                 </div>
-                <ArrowRight className="w-4 h-4 text-white/30 ml-auto" />
+                <ArrowRight className="w-4 h-4 text-brand-muted ml-auto" />
               </div>
             </motion.button>
 
-            <p className="text-center text-white/20 text-xs mt-2">
+            <p className="text-center text-brand-muted/60 text-xs mt-2">
               Swap automático via Jupiter · ~30 segundos
             </p>
           </motion.div>
@@ -343,16 +343,16 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
           >
             <div className="text-center">
               <div className="text-5xl mb-3">🔐</div>
-              <h2 className="font-display text-2xl font-bold text-white mb-2">
+              <h2 className="font-display text-2xl font-bold text-brand-ink mb-2">
                 Confirme seu @handle
               </h2>
-              <p className="text-white/50 text-sm">
+              <p className="text-brand-muted text-sm">
                 Informe o mesmo handle para o qual este pagamento foi enviado.
               </p>
             </div>
 
             <div className="w-full">
-              <label className="text-white/50 text-sm mb-2 block">
+              <label className="text-brand-muted text-sm mb-2 block">
                 Seu @handle ({PLATFORM_LABELS[vault.recipientPlatform]})
               </label>
               <input
@@ -360,23 +360,23 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
                 value={handle}
                 onChange={(e) => setHandle(e.target.value)}
                 placeholder="@seu_usuario"
-                className="w-full bg-bg-card border border-bg-border rounded-2xl px-4 py-3.5 text-white placeholder:text-white/30 text-sm outline-none focus:border-solana-purple/60 transition-colors"
+                className="w-full bg-white border border-brand-border rounded-2xl px-4 py-3.5 text-brand-ink placeholder:text-brand-muted/50 text-sm outline-none focus:border-brand-purple/60 transition-colors"
               />
               {handle.trim().length > 0 && handleHashMatches === false && (
-                <p className="text-red-400 text-xs mt-1.5 flex items-center gap-1">
+                <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
                   <AlertCircle className="w-3.5 h-3.5" />
                   Handle não corresponde a este pagamento
                 </p>
               )}
               {handleHashMatches === true && (
-                <p className="text-solana-green text-xs mt-1.5 flex items-center gap-1">
+                <p className="text-emerald-500 text-xs mt-1.5 flex items-center gap-1">
                   <CheckCircle className="w-3.5 h-3.5" />
                   Handle confirmado!
                 </p>
               )}
             </div>
 
-            <div className="w-full bg-bg-card border border-bg-border rounded-2xl p-4 space-y-2">
+            <div className="w-full bg-white border border-brand-border rounded-2xl p-4 space-y-2">
               <Row
                 label="Você recebe"
                 value={`${formatSol(vault.amount)} SOL`}
@@ -401,7 +401,7 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
 
             <button
               onClick={() => setStep("choose")}
-              className="text-white/40 text-sm"
+              className="text-brand-muted text-sm"
             >
               ← Voltar
             </button>
@@ -418,17 +418,17 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
           >
             <div className="text-center">
               <div className="text-5xl mb-3">🏦</div>
-              <h2 className="font-display text-2xl font-bold text-white mb-1">
+              <h2 className="font-display text-2xl font-bold text-brand-ink mb-1">
                 Receber via PIX
               </h2>
-              <p className="text-white/50 text-sm">
+              <p className="text-brand-muted text-sm">
                 Informe seu @handle e chave PIX para receber R${" "}
                 {formatBrl(vault.amount, solBrl)}.
               </p>
             </div>
 
             <div>
-              <label className="text-white/50 text-sm mb-2 block">
+              <label className="text-brand-muted text-sm mb-2 block">
                 Seu @handle ({PLATFORM_LABELS[vault.recipientPlatform]})
               </label>
               <input
@@ -436,16 +436,16 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
                 value={handle}
                 onChange={(e) => setHandle(e.target.value)}
                 placeholder="@seu_usuario"
-                className="w-full bg-bg-card border border-bg-border rounded-2xl px-4 py-3.5 text-white placeholder:text-white/30 text-sm outline-none focus:border-solana-green/60 transition-colors"
+                className="w-full bg-white border border-brand-border rounded-2xl px-4 py-3.5 text-brand-ink placeholder:text-brand-muted/50 text-sm outline-none focus:border-brand-orange/60 transition-colors"
               />
               {handle.trim().length > 0 && handleHashMatches === false && (
-                <p className="text-red-400 text-xs mt-1.5 flex items-center gap-1">
+                <p className="text-red-500 text-xs mt-1.5 flex items-center gap-1">
                   <AlertCircle className="w-3.5 h-3.5" />
                   Handle não corresponde a este pagamento
                 </p>
               )}
               {handleHashMatches === true && (
-                <p className="text-solana-green text-xs mt-1.5 flex items-center gap-1">
+                <p className="text-emerald-500 text-xs mt-1.5 flex items-center gap-1">
                   <CheckCircle className="w-3.5 h-3.5" />
                   Handle confirmado!
                 </p>
@@ -453,7 +453,7 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
             </div>
 
             <div>
-              <label className="text-white/50 text-sm mb-2 block">
+              <label className="text-brand-muted text-sm mb-2 block">
                 Chave PIX
               </label>
               <input
@@ -461,12 +461,12 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
                 value={pixKey}
                 onChange={(e) => setPixKey(e.target.value)}
                 placeholder="CPF, e-mail, telefone ou chave aleatória"
-                className="w-full bg-bg-card border border-bg-border rounded-2xl px-4 py-3.5 text-white placeholder:text-white/30 text-sm outline-none focus:border-solana-green/60 transition-colors"
+                className="w-full bg-white border border-brand-border rounded-2xl px-4 py-3.5 text-brand-ink placeholder:text-brand-muted/50 text-sm outline-none focus:border-brand-orange/60 transition-colors"
               />
             </div>
 
-            <div className="bg-solana-green/10 border border-solana-green/30 rounded-2xl p-4">
-              <p className="text-white/70 text-sm">
+            <div className="bg-brand-orange-muted border border-brand-border rounded-2xl p-4">
+              <p className="text-brand-ink-soft text-sm">
                 🔄 SOL → USDC via Jupiter → BRL via BRLA · Tempo estimado: ~60s
               </p>
             </div>
@@ -483,7 +483,7 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
 
             <button
               onClick={() => setStep("choose")}
-              className="text-white/40 text-sm text-center"
+              className="text-brand-muted text-sm text-center"
             >
               ← Voltar
             </button>
@@ -501,16 +501,20 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
               transition={{ type: "spring", delay: 0.1 }}
-              className="w-20 h-20 rounded-full bg-solana-green/20 flex items-center justify-center"
+              className="w-20 h-20 rounded-full flex items-center justify-center"
+              style={{
+                background: "linear-gradient(135deg, #FF6B2B 0%, #9945FF 100%)",
+                boxShadow: "0 0 40px rgba(255,107,43,0.25)",
+              }}
             >
-              <CheckCircle className="w-10 h-10 text-solana-green" />
+              <CheckCircle className="w-10 h-10 text-white" />
             </motion.div>
 
             <div>
-              <h2 className="font-display text-2xl font-bold text-white mb-2">
+              <h2 className="font-display text-2xl font-bold text-brand-ink mb-2">
                 Resgatado com sucesso!
               </h2>
-              <p className="text-white/50 text-sm">
+              <p className="text-brand-muted text-sm">
                 {txSig
                   ? `${formatSol(vault.amount)} SOL enviado para sua wallet`
                   : `R$ ${formatBrl(
@@ -525,13 +529,13 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
                 href={`https://explorer.solana.com/tx/${txSig}?cluster=devnet`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-solana-purple text-sm underline"
+                className="text-brand-purple text-sm underline"
               >
                 Ver transação no Explorer
               </a>
             )}
 
-            <p className="text-white/20 text-xs">
+            <p className="text-brand-muted/50 text-xs">
               Powered by Solana · Paga no @
             </p>
           </motion.div>
@@ -544,8 +548,8 @@ export function ClaimPageClient({ vaultId }: { vaultId: string }) {
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex justify-between">
-      <span className="text-white/50 text-sm">{label}</span>
-      <span className="text-white text-sm">{value}</span>
+      <span className="text-brand-muted text-sm">{label}</span>
+      <span className="text-brand-ink text-sm">{value}</span>
     </div>
   );
 }

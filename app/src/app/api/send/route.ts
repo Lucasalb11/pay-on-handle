@@ -133,7 +133,8 @@ export async function POST(req: NextRequest) {
     const senderAta = await getAssociatedTokenAddress(mint, senderPubkey);
     const feeCollectorAta = await getAssociatedTokenAddress(
       mint,
-      feeCollectorPda
+      feeCollectorPda,
+      true
     );
 
     // CreateSplVault context order: vault, vault_token_account, sender_nonce, config,

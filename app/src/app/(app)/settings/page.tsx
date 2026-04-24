@@ -31,10 +31,10 @@ function CopyButton({ text }: { text: string }) {
     <button
       onClick={handleCopy}
       aria-label="Copiar"
-      className="p-1.5 rounded-lg glass text-white/60 hover:text-white transition-colors"
+      className="p-1.5 rounded-lg bg-brand-beige-dark border border-brand-border text-brand-muted hover:text-brand-ink transition-colors"
     >
       {copied ? (
-        <Check className="w-3.5 h-3.5 text-solana-green" />
+        <Check className="w-3.5 h-3.5 text-emerald-500" />
       ) : (
         <Copy className="w-3.5 h-3.5" />
       )}
@@ -55,27 +55,27 @@ function SettingRow({ icon, label, value, onClick, danger, badge }: RowProps) {
   return (
     <button
       onClick={onClick}
-      className={`w-full flex items-center justify-between px-4 py-3.5 hover:bg-white/5 transition-colors ${
-        danger ? "text-red-400" : "text-white"
+      className={`w-full flex items-center justify-between px-4 py-3.5 hover:bg-brand-beige transition-colors ${
+        danger ? "text-red-500" : "text-brand-ink"
       }`}
     >
       <div className="flex items-center gap-3">
-        <span className={`${danger ? "text-red-400" : "text-white/60"}`}>
+        <span className={`${danger ? "text-red-400" : "text-brand-muted"}`}>
           {icon}
         </span>
         <span className="text-sm font-medium">{label}</span>
         {badge && (
-          <span className="text-[10px] bg-solana-purple/20 text-solana-purple px-2 py-0.5 rounded-full">
+          <span className="text-[10px] bg-brand-purple/15 text-brand-purple px-2 py-0.5 rounded-full">
             {badge}
           </span>
         )}
       </div>
       {value ? (
-        <span className="text-white/40 text-xs font-mono truncate max-w-[140px]">
+        <span className="text-brand-muted text-xs font-mono truncate max-w-[140px]">
           {value}
         </span>
       ) : (
-        <ChevronRight className="w-4 h-4 text-white/20" />
+        <ChevronRight className="w-4 h-4 text-brand-muted/50" />
       )}
     </button>
   );
@@ -112,16 +112,16 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="relative min-h-dvh flex flex-col pb-32 bg-[#08080E] overflow-hidden">
+    <main className="relative min-h-dvh flex flex-col pb-32 bg-brand-beige overflow-hidden">
       {/* Ambient orb */}
-      <div className="pointer-events-none absolute -top-16 right-0 w-72 h-72 bg-solana-purple/10 rounded-full blur-[120px]" />
+      <div className="pointer-events-none absolute -top-16 right-0 w-72 h-72 bg-brand-purple/8 rounded-full blur-[120px]" />
 
       {/* Header */}
       <div className="relative z-10 px-5 pt-14 pb-5">
-        <h1 className="font-display text-2xl font-bold text-white">
+        <h1 className="font-display text-2xl font-bold text-brand-ink">
           Configurações
         </h1>
-        <p className="text-white/40 text-sm mt-1">Perfil e preferências</p>
+        <p className="text-brand-muted text-sm mt-1">Perfil e preferências</p>
       </div>
 
       {/* Profile card */}
@@ -130,35 +130,31 @@ export default function SettingsPage() {
         animate={{ opacity: 1, y: 0 }}
         className="relative z-10 mx-5 mb-5 glass-card rounded-3xl p-5 overflow-hidden"
       >
-        <div className="absolute -top-12 -right-12 w-40 h-40 bg-solana-purple/15 rounded-full blur-3xl" />
+        <div className="absolute -top-12 -right-12 w-40 h-40 bg-brand-orange/10 rounded-full blur-3xl" />
         <div className="relative flex items-center gap-4 mb-4">
           <div
-            className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-black shrink-0"
+            className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-white shrink-0"
             style={{
-              padding: "2px",
-              background: "linear-gradient(135deg, #9945FF 0%, #14F195 100%)",
+              background: "linear-gradient(135deg, #FF6B2B 0%, #9945FF 100%)",
             }}
           >
-            <div
-              className="w-full h-full rounded-[14px] flex items-center justify-center"
-              style={{
-                background: "linear-gradient(135deg, #9945FF 0%, #14F195 100%)",
-              }}
-            >
-              {displayName[0]?.toUpperCase() ?? "U"}
-            </div>
+            {displayName[0]?.toUpperCase() ?? "U"}
           </div>
           <div className="min-w-0">
-            <p className="text-white font-semibold truncate">{displayName}</p>
+            <p className="text-brand-ink font-semibold truncate">
+              {displayName}
+            </p>
             {email && (
-              <p className="text-white/40 text-xs mt-0.5 truncate">{email}</p>
+              <p className="text-brand-muted text-xs mt-0.5 truncate">
+                {email}
+              </p>
             )}
           </div>
         </div>
 
         {/* Linked platforms */}
         <div className="relative">
-          <p className="text-white/30 text-xs mb-2 uppercase tracking-wider">
+          <p className="text-brand-muted text-xs mb-2 uppercase tracking-wider">
             Contas vinculadas
           </p>
           <div className="flex gap-2 flex-wrap">
@@ -168,16 +164,16 @@ export default function SettingsPage() {
               return (
                 <div
                   key={key}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ${
                     linked
-                      ? "bg-white/10 text-white border border-white/10"
-                      : "glass text-white/40"
+                      ? "bg-brand-purple-muted text-brand-ink border-brand-border"
+                      : "bg-brand-beige-dark text-brand-muted border-brand-border"
                   }`}
                 >
                   <span>{p.icon}</span>
                   <span>{linked ? `@${twitterHandle}` : p.label}</span>
                   {linked && (
-                    <Check className="w-3 h-3 text-solana-green ml-0.5" />
+                    <Check className="w-3 h-3 text-emerald-500 ml-0.5" />
                   )}
                 </div>
               );
@@ -188,21 +184,21 @@ export default function SettingsPage() {
 
       {/* Wallet group */}
       <div className="relative z-10 mx-5 mb-5">
-        <p className="text-white/40 text-xs font-semibold mb-2 px-1 uppercase tracking-wider">
+        <p className="text-brand-muted text-xs font-semibold mb-2 px-1 uppercase tracking-wider">
           Carteira
         </p>
         <div className="glass-card rounded-2xl overflow-hidden">
           {address && (
-            <div className="flex items-center justify-between px-4 py-3.5 border-b border-white/5">
+            <div className="flex items-center justify-between px-4 py-3.5 border-b border-brand-border">
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-white/60 shrink-0">
+                <span className="text-brand-muted shrink-0">
                   <Shield className="w-4 h-4" />
                 </span>
                 <div className="min-w-0">
-                  <p className="text-white text-sm font-medium">
+                  <p className="text-brand-ink text-sm font-medium">
                     Embedded Wallet
                   </p>
-                  <p className="text-white/40 text-xs font-mono mt-0.5 truncate">
+                  <p className="text-brand-muted text-xs font-mono mt-0.5 truncate">
                     {address.slice(0, 8)}...{address.slice(-8)}
                   </p>
                 </div>
@@ -214,7 +210,7 @@ export default function SettingsPage() {
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="Ver no Solscan"
-                  className="p-1.5 rounded-lg glass text-white/60 hover:text-white transition-colors"
+                  className="p-1.5 rounded-lg bg-brand-beige-dark border border-brand-border text-brand-muted hover:text-brand-ink transition-colors"
                 >
                   <ExternalLink className="w-3.5 h-3.5" />
                 </a>
@@ -232,7 +228,7 @@ export default function SettingsPage() {
 
       {/* App group */}
       <div className="relative z-10 mx-5 mb-5">
-        <p className="text-white/40 text-xs font-semibold mb-2 px-1 uppercase tracking-wider">
+        <p className="text-brand-muted text-xs font-semibold mb-2 px-1 uppercase tracking-wider">
           App
         </p>
         <div className="glass-card rounded-2xl overflow-hidden">
@@ -242,7 +238,7 @@ export default function SettingsPage() {
             value="Português"
             onClick={() => {}}
           />
-          <div className="border-t border-white/5">
+          <div className="border-t border-brand-border">
             <SettingRow
               icon={<Code className="w-4 h-4" />}
               label="Rede"
@@ -256,16 +252,16 @@ export default function SettingsPage() {
       {/* Claim link */}
       {address && (
         <div className="relative z-10 mx-5 mb-5">
-          <p className="text-white/40 text-xs font-semibold mb-2 px-1 uppercase tracking-wider">
+          <p className="text-brand-muted text-xs font-semibold mb-2 px-1 uppercase tracking-wider">
             Meu link de recebimento
           </p>
           <div className="glass-card rounded-2xl p-4 flex items-center justify-between gap-3">
-            <p className="text-white/70 text-xs font-mono truncate flex-1">
+            <p className="text-brand-ink-soft text-xs font-mono truncate flex-1">
               paganno.at/claim/{address.slice(0, 8)}...
             </p>
             <CopyButton text={`https://paganno.at/claim/wallet/${address}`} />
           </div>
-          <p className="text-white/30 text-xs mt-2 px-1">
+          <p className="text-brand-muted text-xs mt-2 px-1">
             Compartilhe para receber pagamentos sem login
           </p>
         </div>
@@ -273,7 +269,7 @@ export default function SettingsPage() {
 
       {/* Logout */}
       <div className="relative z-10 mx-5">
-        <div className="glass-card rounded-2xl overflow-hidden border-red-500/20">
+        <div className="bg-white border border-red-100 rounded-2xl overflow-hidden">
           <SettingRow
             icon={<LogOut className="w-4 h-4" />}
             label="Sair da conta"
@@ -284,7 +280,7 @@ export default function SettingsPage() {
       </div>
 
       {/* Version */}
-      <p className="relative z-10 text-center text-white/20 text-xs mt-6">
+      <p className="relative z-10 text-center text-brand-muted/50 text-xs mt-6">
         Paga no @ · v0.1.0 · Devnet
       </p>
 

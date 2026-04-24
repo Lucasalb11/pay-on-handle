@@ -93,7 +93,12 @@ export async function GET(
       vaultNonce,
     });
   } catch (e: any) {
-    if (e.message?.includes("Invalid public key")) {
+    const msg: string = e?.message ?? "";
+    if (
+      msg.includes("Invalid public key") ||
+      msg.includes("Non-base58") ||
+      msg.includes("Invalid base58")
+    ) {
       return NextResponse.json({ error: "Invalid vault ID" }, { status: 400 });
     }
     console.error("vault fetch error:", e);

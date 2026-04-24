@@ -4,20 +4,25 @@ import { Providers } from "@/components/providers";
 import { Toaster } from "sonner";
 
 export const metadata: Metadata = {
-  title: "Paga no @",
+  title: "Pay on @ — Social payments infrastructure for Solana",
   description:
-    "Um @, zero barreiras. Envie crypto para qualquer Instagram, X ou WhatsApp.",
+    "Send SOL or USDC to any X, Instagram or WhatsApp handle. No wallet required. Non-custodial 7-day escrow vault. Built on Solana.",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Paga no @",
+    title: "Pay on @",
   },
   openGraph: {
-    title: "Paga no @",
+    title: "Pay on @ — Pay anyone. Just their @.",
     description:
-      "Envie SOL ou USDC para qualquer @handle. Sem wallet necessária.",
+      "Send SOL or USDC to any social handle. Recipient claims with one tap — no wallet required. Built on Solana.",
     type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Pay on @ — Social payments infrastructure for Solana",
+    description: "Send SOL or USDC to any @handle. No wallet address needed.",
   },
 };
 
@@ -26,7 +31,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: "#0A0A0F",
+  themeColor: "#F7F3ED",
 };
 
 export default function RootLayout({
@@ -35,17 +40,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-BR" className="dark">
-      <body className="bg-bg font-sans antialiased">
+    <html lang="pt-BR">
+      <body className="bg-brand-beige font-sans antialiased">
         <Providers>
-          <div className="app-container">{children}</div>
+          {children}
           <Toaster
             position="top-center"
             toastOptions={{
               style: {
-                background: "#111118",
-                border: "1px solid #1E1E2E",
-                color: "white",
+                background: "#FFFFFF",
+                border: "1px solid #E8DFF5",
+                color: "#1A1028",
               },
             }}
           />

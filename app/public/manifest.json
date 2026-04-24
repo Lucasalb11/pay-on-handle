@@ -1,12 +1,12 @@
 {
-  "name": "Paga no @",
-  "short_name": "Paga @",
-  "description": "Um @, zero barreiras. Pagamentos crypto para qualquer handle social.",
+  "name": "Pay on @",
+  "short_name": "Pay on @",
+  "description": "Send SOL or USDC to any social handle. No wallet required.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0A0A0F",
-  "theme_color": "#0A0A0F",
+  "background_color": "#050410",
+  "theme_color": "#050410",
   "icons": [
     {
       "src": "/icon-192.png",
@@ -22,6 +22,5 @@
     }
   ],
   "categories": ["finance", "utilities"],
-  "lang": "pt-BR",
-  "screenshots": []
+  "lang": "en"
 }

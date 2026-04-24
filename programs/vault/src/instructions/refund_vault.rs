@@ -16,6 +16,7 @@ pub struct RefundSolVault<'info> {
         has_one = sender @ VaultError::Unauthorized,
         constraint = vault.status == VaultStatus::Pending @ VaultError::VaultNotPending,
         constraint = vault.mint == NATIVE_SOL_MINT @ VaultError::UnsupportedMint,
+        close = sender,
     )]
     pub vault: Account<'info, PaymentVault>,
 
@@ -60,6 +61,7 @@ pub struct RefundSplVault<'info> {
         bump = vault.bump,
         has_one = sender @ VaultError::Unauthorized,
         constraint = vault.status == VaultStatus::Pending @ VaultError::VaultNotPending,
+        close = sender,
     )]
     pub vault: Account<'info, PaymentVault>,
 

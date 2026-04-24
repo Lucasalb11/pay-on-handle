@@ -21,6 +21,7 @@ pub struct ClaimSolVault<'info> {
         bump = vault.bump,
         constraint = vault.status == VaultStatus::Pending @ VaultError::VaultNotPending,
         constraint = vault.mint == NATIVE_SOL_MINT @ VaultError::UnsupportedMint,
+        close = claimer,
     )]
     pub vault: Account<'info, PaymentVault>,
 
@@ -111,6 +112,7 @@ pub struct ClaimSplVault<'info> {
         seeds = [b"vault", vault.sender.as_ref(), &vault.vault_nonce.to_le_bytes()],
         bump = vault.bump,
         constraint = vault.status == VaultStatus::Pending @ VaultError::VaultNotPending,
+        close = claimer,
     )]
     pub vault: Account<'info, PaymentVault>,
 

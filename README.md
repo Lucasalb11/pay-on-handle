@@ -1,39 +1,39 @@
-# Pay on @ — Paga no @
+# Paga no @ — Pay on Handle
 
-> Send SOL and USDC to any Instagram, X (Twitter), or WhatsApp handle. No wallet required to receive.
+> Envie SOL e USDC para qualquer Instagram, X (Twitter) ou WhatsApp. Sem wallet necessária para receber.
 
-Built for the **Colosseum Frontier Hackathon**
+**Construído para o Colosseum Frontier Hackathon · Superteam Brazil**
 
 ---
 
-## Overview
+## Visão Geral
 
-**Pay on @** solves a fundamental UX problem in crypto payments: the recipient needs a wallet address. With Pay on @, the sender only needs the recipient's social media handle — the funds sit in a 7-day escrow vault on Solana until the recipient claims them (with or without a pre-existing wallet), or the sender gets a full refund.
+**Paga no @** resolve um problema fundamental de UX em pagamentos cripto: o destinatário precisa de um endereço de wallet. Com o Pay on @, o remetente só precisa do @handle de rede social — os fundos ficam em escrow por 7 dias num vault Solana até o destinatário fazer o claim (com ou sem wallet pré-existente), ou o remetente recebe reembolso total.
 
 ```
-Sender                          Protocol                        Recipient (@handle)
+Remetente                       Protocolo                      Destinatário (@handle)
   │                               │                                │
-  │── send 10 USDC → @alice ──►   │                                │
-  │                               │── PaymentVault created         │
-  │                               │   (7-day escrow)               │
+  │── envia 10 USDC → @alice ──►  │                                │
+  │                               │── PaymentVault criado          │
+  │                               │   (escrow 7 dias)              │
   │                               │                                │
-  │                               │   @alice receives claim link   │
+  │                               │   @alice recebe link de claim  │
   │                               │◄──────────────────────────────►│
   │                               │                                │
-  │                               │◄── claim (verify Twitter auth)─┤
+  │                               │◄── claim (verifica Twitter) ───┤
   │                               │                                │
-  │                               │── funds released to @alice     │
+  │                               │── fundos liberados para @alice │
 ```
 
 ---
 
-## Architecture
+## Arquitetura
 
-### System Overview
+### Visão do Sistema
 
 ```mermaid
 graph TB
-    subgraph Client ["Client (Next.js 14 PWA)"]
+    subgraph Client ["Cliente (Next.js 14 PWA)"]
         UI[Mobile UI<br/>React + Tailwind]
         Privy[Privy Embedded Wallets<br/>Social Login]
         RQ[React Query<br/>Cache Layer]
@@ -72,102 +72,102 @@ graph TB
     FeeCollector --> FeeCollectorPDA
 ```
 
-### Send Flow
+### Fluxo de Envio
 
 ```mermaid
 sequenceDiagram
-    actor Sender
+    actor Remetente
     participant App as PWA (Next.js)
     participant API as /api/send
     participant Privy
     participant Vault as Vault Program
 
-    Sender->>App: Enter @handle + amount
+    Remetente->>App: Digita @handle + valor
     App->>API: POST {sender, platform, handle, amountSol}
-    API->>API: Derive PDAs (vault, noncePda, handleRecord)
-    API->>API: Build unsigned Transaction
+    API->>API: Deriva PDAs (vault, noncePda, handleRecord)
+    API->>API: Constrói transação não assinada
     API-->>App: {transaction: base64, vault: pubkey}
     App->>Privy: signTransaction(tx)
-    Privy-->>App: signed tx
+    Privy-->>App: tx assinada
     App->>Vault: sendRawTransaction
-    Vault->>Vault: create_vault (transfer - 0.5% fee to fee_collector)
-    Vault-->>App: signature
-    App-->>Sender: Success + shareable claim link
+    Vault->>Vault: create_vault (transfere - 0.5% fee → fee_collector)
+    Vault-->>App: assinatura
+    App-->>Remetente: Sucesso + link de claim compartilhável
 ```
 
-### Claim Flow
+### Fluxo de Claim
 
 ```mermaid
 sequenceDiagram
-    actor Recipient
-    participant App as Claim Page (public)
+    actor Destinatário
+    participant App as Claim Page (pública)
     participant Privy
     participant API as /api/claim
     participant Vault as Vault Program
 
-    Recipient->>App: Open claim link /claim/:vaultId
-    App->>App: Read vault state on-chain
-    Recipient->>Privy: Login with Twitter/Instagram
+    Destinatário->>App: Abre link /claim/:vaultId
+    App->>App: Lê estado do vault on-chain
+    Destinatário->>Privy: Login com Twitter/Instagram
     App->>API: POST {claimant, vaultId, platform, handle}
-    API->>API: Verify vault is pending + not expired
-    API->>API: Build claim instruction
+    API->>API: Verifica vault pending + não expirado
+    API->>API: Constrói instrução de claim
     API-->>App: {transaction: base64}
     App->>Privy: signAndSendTransaction(tx)
     Privy-->>Vault: claim_vault
-    Vault->>Vault: Verify handle_hash matches
-    Vault->>Vault: Transfer lamports to claimant
-    Vault-->>App: signature
-    App-->>Recipient: Claimed!
+    Vault->>Vault: Verifica handle_hash
+    Vault->>Vault: Transfere lamports para claimant
+    Vault-->>App: assinatura
+    App-->>Destinatário: Claimed!
 ```
 
 ---
 
-## Programs
+## Programas
 
 ### Registry (`AT8S64nJohSwwAv4BxfvAxwaWaVnfFvfsVXVjA8DZkvX`)
 
-Maps social handles to destination wallets. Handles are SHA-256 hashed before storing — no plaintext on-chain.
+Mapeia handles sociais para wallets destino. Handles são SHA-256 hasheados antes de armazenar — nenhum texto em claro on-chain.
 
-| Instruction | Description |
+| Instrução | Descrição |
 |---|---|
-| `initialize_config` | One-time setup, sets authority |
-| `register_handle` | Register `(platform, handle) → wallet` mapping |
-| `update_wallet` | Owner updates their destination wallet |
-| `verify_handle` | Authority marks a handle as verified |
+| `initialize_config` | Setup único, define authority |
+| `register_handle` | Registra `(platform, handle) → wallet` |
+| `update_wallet` | Owner atualiza wallet destino |
+| `verify_handle` | Authority marca handle como verificado |
 
-**HandleRecord PDA seeds:** `["handle", platform_u8, sha256(normalized_handle)]`
+**Seeds do HandleRecord PDA:** `["handle", platform_u8, sha256(normalized_handle)]`
 
 ### Vault (`EgS854XfeyTkuTKpYzDD3h5kiKMt4h3J37hGaBfuDN4H`)
 
-Manages 7-day payment escrows with per-sender nonces.
+Gerencia escrow de pagamentos de 7 dias com nonces por remetente.
 
-| Instruction | Description |
+| Instrução | Descrição |
 |---|---|
-| `initialize_config` | Set fee_bps (default 50 = 0.5%), claim_period, authority |
-| `create_vault` | Deposit SOL/USDC into escrow; deducts fee to FeeCollector |
-| `claim_vault` | Recipient claims by proving handle ownership |
-| `refund_vault` | Sender reclaims after expiry |
+| `initialize_config` | Define fee_bps (padrão 50 = 0.5%), claim_period, authority |
+| `create_vault` | Deposita SOL/USDC em escrow; deduz taxa para FeeCollector |
+| `claim_vault` | Destinatário faz claim provando posse do handle |
+| `refund_vault` | Remetente recupera após expiração |
 
-**PaymentVault PDA seeds:** `["vault", sender_pubkey, nonce_u64_le]`
-**SenderNonce PDA seeds:** `["nonce", sender_pubkey]`
+**Seeds do PaymentVault PDA:** `["vault", sender_pubkey, nonce_u64_le]`  
+**Seeds do SenderNonce PDA:** `["nonce", sender_pubkey]`
 
-**VaultStatus enum:** `Pending(0)` → `Claimed(1)` or `Refunded(2)` or `Expired(3)`
+**Enum VaultStatus:** `Pending(0)` → `Claimed(1)` ou `Refunded(2)` ou `Expired(3)`
 
 ### Fee Collector (`CxMBNwbovsvLTe7bSuca8X26WS7PW81VtDu3oLyfSG6s`)
 
-Accumulates protocol fees (0.5% of each transfer). Authority can withdraw.
+Acumula taxas do protocolo (0.5% de cada transferência). Authority pode sacar.
 
-| Instruction | Description |
+| Instrução | Descrição |
 |---|---|
-| `initialize` | Create the treasury PDA |
-| `withdraw_sol` | Withdraw accumulated SOL |
-| `withdraw_spl` | Withdraw accumulated SPL tokens |
+| `initialize` | Cria o PDA de treasury |
+| `withdraw_sol` | Saca SOL acumulado |
+| `withdraw_spl` | Saca tokens SPL acumulados |
 
 ---
 
-## Account Layouts
+## Layout de Contas
 
-### PaymentVault (bytes after 8-byte Anchor discriminator)
+### PaymentVault (bytes após discriminador Anchor de 8 bytes)
 
 ```
 sender:                 Pubkey  [32]
@@ -183,7 +183,7 @@ vault_nonce:            u64     [8]
 bump:                   u8      [1]
 ```
 
-### HandleRecord (bytes after 8-byte discriminator)
+### HandleRecord (bytes após discriminador de 8 bytes)
 
 ```
 platform:           u8      [1]   (0=Instagram, 1=Twitter, 2=WhatsApp)
@@ -202,15 +202,15 @@ bump:               u8      [1]
 
 **Stack:** Next.js 14 App Router · TailwindCSS · Framer Motion · React Query · Privy
 
-**Pages:**
-- `/` — Landing/onboarding, social login CTA
-- `/wallet` — Dashboard: balance (SOL + USD + BRL), quick actions, history
-- `/send` — 4-step send flow: handle → amount → confirm (shows fee) → success
-- `/claim/:vaultId` — Public claim page (no auth required to view, auth to claim)
-- `/defi` — DeFi yield strategies hub (Kamino, Sanctum, Orca)
-- `/settings` — Profile, linked accounts, wallet address, logout
+**Páginas:**
+- `/` — Landing institucional, explica o protocolo, CTA de login
+- `/wallet` — Dashboard: saldo (SOL + USD + BRL), ações rápidas, histórico
+- `/send` — Fluxo de 4 passos: handle → valor → confirmar (mostra taxa) → sucesso
+- `/claim/:vaultId` — Página pública de claim (não requer auth para ver, requer para claimar)
+- `/defi` — Hub de estratégias DeFi (Kamino, Sanctum, Orca)
+- `/settings` — Perfil, contas vinculadas, endereço da wallet, logout
 
-**Auth:** Privy embedded wallets — users sign in with Google/Apple/Twitter/email. A Solana wallet is automatically created if they don't have one.
+**Auth:** Privy embedded wallets — usuários entram com Google/Apple/Twitter/email. Uma wallet Solana é criada automaticamente se não tiverem uma.
 
 ---
 
@@ -222,7 +222,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 
 const connection = new Connection("https://api.devnet.solana.com");
 
-// Build a send transaction
+// Construir transação de envio
 const { transaction, vault, netAmount, feeAmount } = await buildCreateVaultTx({
   connection,
   sender: new PublicKey("..."),
@@ -231,11 +231,11 @@ const { transaction, vault, netAmount, feeAmount } = await buildCreateVaultTx({
   amountLamports: 1_000_000_000n, // 1 SOL
 });
 
-// Read vault state
+// Ler estado do vault
 const vaultData = await fetchVault(connection, vault);
 console.log(vaultData?.status); // "pending"
 
-// Build a claim transaction
+// Construir transação de claim
 const claimTx = await buildClaimVaultTx({
   connection,
   claimant: new PublicKey("..."),
@@ -248,109 +248,107 @@ const claimTx = await buildClaimVaultTx({
 
 ---
 
-## Getting Started
+## Começando
 
-### Prerequisites
+### Pré-requisitos
 
 - Rust + Solana CLI (`1.18+`)
 - Anchor CLI (`0.32.0`)
 - Node.js 20+ / Bun
-- A funded devnet wallet (`solana airdrop 2`)
+- Wallet devnet com fundos (`solana airdrop 2`)
 
-### Build Programs
+### Build dos Programas
 
 ```bash
 anchor build
 ```
 
-### Run Tests
+### Executar Testes
 
 ```bash
 anchor test
 ```
 
-### Deploy to Devnet
+### Deploy para Devnet
 
 ```bash
 anchor deploy --provider.cluster devnet
 ```
 
-### Run the Frontend
+### Executar o Frontend
 
 ```bash
 cd app
 cp .env.example .env.local
-# Fill in NEXT_PUBLIC_PRIVY_APP_ID and NEXT_PUBLIC_RPC_ENDPOINT
+# Preencha NEXT_PUBLIC_PRIVY_APP_ID e NEXT_PUBLIC_RPC_ENDPOINT
 npm install
 npm run dev
 ```
 
 ---
 
-## Environment Variables
+## Variáveis de Ambiente
 
 ```bash
 # app/.env.local
-NEXT_PUBLIC_PRIVY_APP_ID=your_privy_app_id
-NEXT_PUBLIC_RPC_ENDPOINT=https://devnet.helius-rpc.com/?api-key=YOUR_KEY
+NEXT_PUBLIC_PRIVY_APP_ID=seu_privy_app_id
+NEXT_PUBLIC_RPC_ENDPOINT=https://devnet.helius-rpc.com/?api-key=SUA_KEY
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 
-# Relayer keypair (base58) — pays for on-chain register_handle txs
-RELAYER_PRIVATE_KEY=base58_encoded_key
+# Keypair do relayer (base58) — paga por txs on-chain de register_handle
+RELAYER_PRIVATE_KEY=chave_base58_encoded
 
-# Privy server-side JWT verification
-PRIVY_APP_SECRET=your_privy_app_secret
+# Verificação JWT server-side do Privy
+PRIVY_APP_SECRET=seu_privy_app_secret
 
 # Helius
-HELIUS_API_KEY=your_helius_key
-HELIUS_WEBHOOK_SECRET=your_webhook_secret
+HELIUS_API_KEY=sua_helius_key
+HELIUS_WEBHOOK_SECRET=seu_webhook_secret
 
-# PIX off-ramp (future)
-OPENPIX_APP_ID=your_openpix_key
-BRLA_API_KEY=your_brla_key
+# PIX off-ramp (futuro)
+OPENPIX_APP_ID=sua_openpix_key
+BRLA_API_KEY=sua_brla_key
 
-# Instagram OAuth (future)
-META_APP_ID=your_meta_app_id
-META_APP_SECRET=your_meta_app_secret
-META_REDIRECT_URI=https://your-domain.com/api/auth/instagram/callback
+# Instagram OAuth (futuro)
+META_APP_ID=seu_meta_app_id
+META_APP_SECRET=seu_meta_app_secret
+META_REDIRECT_URI=https://seu-dominio.com/api/auth/instagram/callback
 
-# Redis (required for PIX store persistence)
+# Redis (necessário para persistência do PIX store)
 UPSTASH_REDIS_REST_URL=https://xxx.upstash.io
-UPSTASH_REDIS_REST_TOKEN=your_token
+UPSTASH_REDIS_REST_TOKEN=seu_token
 ```
 
 ---
 
-## Deployment
+## Deploy
 
-### Option A — Vercel (recommended for frontend)
+### Opção A — Vercel (recomendado para frontend)
 
-Vercel is the simplest path: connect your GitHub repo and Vercel handles the build automatically.
+Vercel é o caminho mais simples: conecte seu repositório GitHub e o Vercel cuida do build automaticamente.
 
-**Requirements before deploying:**
-- `output: 'standalone'` is already set in `next.config.mjs` ✅
-- All `NEXT_PUBLIC_*` env vars must be set in Vercel dashboard
-- Server-only env vars (`RELAYER_PRIVATE_KEY`, `HELIUS_API_KEY`, etc.) are set as non-public variables
-- Add **Upstash Redis** integration (free tier) for PIX store persistence
+**Requisitos antes do deploy:**
+- `output: 'standalone'` já está configurado em `next.config.mjs` ✅
+- Todas as variáveis `NEXT_PUBLIC_*` devem estar no painel do Vercel
+- Variáveis server-only (`RELAYER_PRIVATE_KEY`, `HELIUS_API_KEY`, etc.) como variáveis não-públicas
+- Adicionar integração **Upstash Redis** (tier gratuito) para persistência do PIX store
 
-**Steps:**
-1. Push the `app/` directory (or the full repo) to GitHub
-2. Import the repo in [vercel.com/new](https://vercel.com/new)
-3. Set **Root Directory** to `pay-on-handle/app`
-4. Add all environment variables under *Settings → Environment Variables*
+**Passos:**
+1. Push do diretório `app/` (ou repo completo) para o GitHub
+2. Importe o repo em [vercel.com/new](https://vercel.com/new)
+3. Defina **Root Directory** como `pay-on-handle/app`
+4. Adicione todas as variáveis de ambiente em *Settings → Environment Variables*
 5. Deploy
-
-**Limitation:** Vercel serverless functions are stateless — `pix-store.ts` (in-memory `Map`) loses state between requests. Migrate to Upstash Redis before enabling PIX.
 
 ---
 
-### Option B — Railway (full Docker deploy)
+### Opção B — Railway (deploy Docker completo)
 
-Railway runs a persistent Node.js container, making it simpler for stateful use cases.
+Railway executa um container Node.js persistente, ideal para casos de uso com estado.
 
-**`next.config.mjs`** already has `output: 'standalone'` ✅
+**`next.config.mjs`** já tem `output: 'standalone'` ✅
 
-**Create `app/Dockerfile`:**
+**Crie `app/Dockerfile`:**
 
 ```dockerfile
 FROM node:20-alpine AS builder
@@ -371,89 +369,70 @@ EXPOSE 3000
 CMD ["node", "server.js"]
 ```
 
-**Steps:**
-1. Go to [railway.app](https://railway.app) → New Project → Deploy from GitHub Repo
-2. Select your repo; set **Root Directory** to `pay-on-handle/app`
-3. Railway auto-detects Next.js — or point it to the Dockerfile above
-4. Add a **Redis** service inside the same Railway project (for PIX store)
-5. Add all environment variables in *Variables* tab (Railway auto-injects `REDIS_URL`)
-6. Set `NEXT_PUBLIC_APP_URL` to your Railway-generated URL (e.g. `https://pay-on-handle-production-70a5.up.railway.app`)
+**Passos:**
+1. Acesse [railway.app](https://railway.app) → New Project → Deploy from GitHub Repo
+2. Selecione o repo; defina **Root Directory** como `pay-on-handle/app`
+3. Railway detecta Next.js automaticamente
+4. Adicione um serviço **Redis** no mesmo projeto Railway
+5. Adicione todas as variáveis de ambiente na aba *Variables*
+6. Defina `NEXT_PUBLIC_APP_URL` para a URL gerada pelo Railway
 7. Deploy
-
-**Environment variables for Railway:**
-
-```bash
-# Public (exposed to browser)
-NEXT_PUBLIC_PRIVY_APP_ID=cmo0pavcd00860cjp0engxymy
-NEXT_PUBLIC_RPC_ENDPOINT=https://devnet.helius-rpc.com/?api-key=YOUR_KEY
-NEXT_PUBLIC_VAULT_PROGRAM_ID=EgS854XfeyTkuTKpYzDD3h5kiKMt4h3J37hGaBfuDN4H
-NEXT_PUBLIC_REGISTRY_PROGRAM_ID=AT8S64nJohSwwAv4BxfvAxwaWaVnfFvfsVXVjA8DZkvX
-NEXT_PUBLIC_FEE_COLLECTOR_PROGRAM_ID=CxMBNwbovsvLTe7bSuca8X26WS7PW81VtDu3oLyfSG6s
-NEXT_PUBLIC_APP_URL=https://pay-on-handle-production-70a5.up.railway.app
-
-# Server-only
-RELAYER_PRIVATE_KEY=<bs58 keypair — keep secret>
-PRIVY_APP_SECRET=<from Privy dashboard → API Keys>
-HELIUS_API_KEY=e657af06-55cf-4b04-bb72-09909232d6c4
-HELIUS_WEBHOOK_SECRET=<generate and set in Helius dashboard>
-OPENPIX_APP_ID=<Woovi — pending>
-REDIS_URL=<auto-injected by Railway Redis service>
-```
 
 ---
 
-## Security Model
+## Modelo de Segurança
 
-| Threat | Mitigation |
+| Ameaça | Mitigação |
 |---|---|
-| Wrong recipient claims | `claim_vault` verifies SHA-256 of handle matches stored hash |
-| Double claim | Status transitions: `Pending → Claimed` (immutable after) |
-| Sender griefing | 7-day claim window; refund only after expiry |
-| Fee manipulation | Fee bps stored in `VaultConfig` PDA, only authority can update |
-| Overflow/underflow | All arithmetic uses `checked_add`, `checked_sub`, `checked_mul` |
-| PDA substitution | Seeds include sender pubkey + nonce; canonical bump stored |
-| Re-initialization | `init` not `init_if_needed` for VaultConfig and FeeCollector |
-| Arbitrary CPI | All CPI targets validated via `Program<'info, T>` constraints |
+| Claim errado de destinatário | `claim_vault` verifica SHA-256 do handle com hash armazenado |
+| Double claim | Transições de status: `Pending → Claimed` (imutável depois) |
+| Sender griefing | Janela de 7 dias; reembolso só após expiração |
+| Manipulação de fee | Fee bps armazenado em PDA `VaultConfig`, só authority atualiza |
+| Overflow/underflow | Toda aritmética usa `checked_add`, `checked_sub`, `checked_mul` |
+| PDA substitution | Seeds incluem sender pubkey + nonce; canonical bump armazenado |
+| Re-inicialização | `init` em vez de `init_if_needed` para VaultConfig e FeeCollector |
+| CPI arbitrário | Todos os targets de CPI validados via `Program<'info, T>` |
 
 ---
 
 ## Roadmap
 
-### Phase 1 — Devnet Live (current sprint)
+### Fase 1 — Devnet Live (sprint atual)
 
-- [x] On-chain programs (Registry, Vault, FeeCollector)
+- [x] Programas on-chain (Registry, Vault, FeeCollector)
 - [x] Next.js 14 PWA (send, claim, wallet, DeFi, settings)
 - [x] TypeScript SDK
-- [x] `next build` passing, `output: standalone`
-- [ ] Initialize VaultConfig PDA on devnet
-- [ ] Configure Helius webhook → `/api/webhooks/helius`
-- [ ] Twitter OAuth enabled in Privy dashboard
-- [ ] Handle registration onboarding flow (auto-register after OAuth)
-- [ ] Real wallet activity history via Helius `getTransactionHistory`
+- [x] Landing page institucional
+- [x] `next build` passando, `output: standalone`
+- [ ] Inicializar VaultConfig PDA no devnet
+- [ ] Configurar webhook Helius → `/api/webhooks/helius`
+- [ ] Twitter OAuth habilitado no painel do Privy
+- [ ] Fluxo de onboarding de registro de handle (auto-register após OAuth)
+- [ ] Histórico real de atividade via Helius `getTransactionHistory`
 
-### Phase 2 — PIX Off-ramp
+### Fase 2 — Off-ramp PIX
 
-- [ ] Migrate `pix-store.ts` from in-memory `Map` to Redis (Upstash/Railway)
-- [ ] Integrate OpenPix/Woovi API for PIX dispatch
-- [ ] Jupiter swap: SOL → USDC on claim (before PIX conversion)
-- [ ] BRLA Digital integration for BRL stablecoin path
+- [ ] Migrar `pix-store.ts` de `Map` in-memory para Redis (Upstash/Railway)
+- [ ] Integrar API OpenPix/Woovi para despacho de PIX
+- [ ] Jupiter swap: SOL → USDC no claim (antes da conversão PIX)
+- [ ] Integração BRLA Digital para caminho de stablecoin BRL
 
-### Phase 3 — Instagram + Program Hardening
+### Fase 3 — Instagram + Hardening dos Programas
 
 - [ ] Instagram OAuth via Meta Graph API (`/api/auth/instagram/callback`)
-- [ ] Close vault PDAs after claim/refund (recover ~0.002 SOL rent)
-- [ ] Mint whitelist on `create_spl_vault` (accept only USDC)
-- [ ] ZK proof of handle ownership (replace MVP stub in Registry)
+- [ ] Fechar vault PDAs após claim/refund (recuperar ~0.002 SOL de rent)
+- [ ] Whitelist de mints em `create_spl_vault` (aceitar só USDC)
+- [ ] Prova ZK de posse de handle (substituir MVP stub no Registry)
 
-### Phase 4 — DeFi + Cross-Chain
+### Fase 4 — DeFi + Cross-Chain
 
-- [ ] Kamino yield vault — idle escrow earns yield while waiting for claim
-- [ ] Orca/Meteora LP integration
-- [ ] Ika cross-chain bridgeless deposits
-- [ ] Push notifications via Helius webhooks
+- [ ] Vault de yield Kamino — escrow ocioso rende yield enquanto aguarda claim
+- [ ] Integração Orca/Meteora LP
+- [ ] Depósitos cross-chain bridgeless via Ika
+- [ ] Push notifications via webhooks Helius
 
 ---
 
-## License
+## Licença
 
 MIT — © 2025 Superteam Brazil

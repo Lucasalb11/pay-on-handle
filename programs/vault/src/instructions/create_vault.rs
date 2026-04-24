@@ -1,6 +1,9 @@
 use crate::{
     errors::VaultError,
-    state::{PaymentVault, SenderNonce, VaultConfig, VaultStatus, BPS_DIVISOR, NATIVE_SOL_MINT},
+    state::{
+        PaymentVault, SenderNonce, VaultConfig, VaultStatus, BPS_DIVISOR, NATIVE_SOL_MINT,
+        USDC_DEVNET_MINT, USDC_MAINNET_MINT,
+    },
 };
 use anchor_lang::prelude::*;
 use anchor_lang::system_program;
@@ -230,6 +233,11 @@ pub fn create_spl_vault_handler(
     require!(
         recipient_handle_hash != [0u8; 32],
         VaultError::HandleMismatch
+    );
+    let mint_key = ctx.accounts.mint.key();
+    require!(
+        mint_key == USDC_DEVNET_MINT || mint_key == USDC_MAINNET_MINT,
+        VaultError::UnsupportedMint
     );
 
     let config = &ctx.accounts.config;

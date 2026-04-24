@@ -16,12 +16,11 @@ interface ButtonProps extends Omit<HTMLMotionProps<"button">, "ref"> {
 
 const variants: Record<ButtonVariant, string> = {
   primary:
-    "bg-gradient-solana text-black font-semibold shadow-lg shadow-purple-500/20",
+    "bg-gradient-to-br from-brand-orange to-brand-purple text-white font-semibold shadow-lg shadow-brand-purple/20",
   secondary:
-    "bg-bg-card border border-bg-border text-white hover:border-solana-purple/50",
-  ghost: "text-white/70 hover:text-white hover:bg-bg-card",
-  danger:
-    "bg-red-500/10 border border-red-500/30 text-red-400 hover:bg-red-500/20",
+    "bg-white border border-brand-border text-brand-ink hover:border-brand-purple/40",
+  ghost: "text-brand-ink-soft hover:text-brand-ink hover:bg-brand-beige-dark",
+  danger: "bg-red-50 border border-red-200 text-red-500 hover:bg-red-100",
 };
 
 const sizes: Record<ButtonSize, string> = {

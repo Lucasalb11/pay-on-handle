@@ -22,6 +22,13 @@ pub mod fee_collector {
     pub fn withdraw_sol(ctx: Context<WithdrawSol>, amount: u64) -> Result<()> {
         require!(amount > 0, FeeError::ZeroAmount);
 
+        let account_info = ctx.accounts.fee_collector.to_account_info();
+        let rent_minimum = Rent::get()?.minimum_balance(account_info.data_len());
+        require!(
+            account_info.lamports().saturating_sub(amount) >= rent_minimum,
+            FeeError::InsufficientBalance
+        );
+
         **ctx
             .accounts
             .fee_collector
@@ -163,6 +170,8 @@ pub enum FeeError {
     ZeroAmount,
     #[msg("Unauthorized")]
     Unauthorized,
+    #[msg("Insufficient balance — must maintain rent exemption")]
+    InsufficientBalance,
 }
 
 #[event]

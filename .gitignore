@@ -10,3 +10,23 @@ test-ledger
 .next
 out
 build
+
+# Env files — never commit secrets
+.env
+.env.local
+.env.*.local
+app/.env
+app/.env.local
+app/.env.*.local
+
+# Deploy keypairs
+*-keypair.json
+deploy-keypair.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor
+.vscode/
+.idea/

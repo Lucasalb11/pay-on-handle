@@ -2,7 +2,7 @@
 
 > Última atualização: 2026-04-23
 > Network: **Devnet**
-> Stack: Anchor 0.32 · Next.js 14 · Privy · Helius RPC
+> Stack: Anchor 0.32 · Next.js 14 · Privy · Helius RPC · Cloak (privacidade)
 
 ---
 
@@ -19,6 +19,7 @@
 │  /app  ─ frontend React + Tailwind                         │
 │  /api  ─ route handlers (Node.js edge-compat)              │
 │    ├─ /api/send          ← monta tx CreateSolVault         │
+│    │    └─ (Cloak: encaminha via relay privado)            │
 │    ├─ /api/claim         ← monta tx ClaimSolVault          │
 │    ├─ /api/claim-pix     ← monta tx + inicia fluxo PIX     │
 │    ├─ /api/vault/[id]    ← lê PaymentVault on-chain        │
@@ -33,6 +34,12 @@
 │  Registry  AT8S64n...   ← mapeia @handle → carteira       │
 │  Vault     EgS854X...   ← escrow SOL/USDC por handle      │
 │  FeeCollector CxMBNw... ← recebe 0.5% de cada envio       │
+└────────────────────────────────────────────────────────────┘
+                     │ (modo privado)
+┌────────────────────▼───────────────────────────────────────┐
+│  Cloak Relay  api.cloak.ag                                 │
+│  Program: zh1eLd6rSphLejbFfJEneUwzHRfMKxgzrgkfwA6qRkW    │
+│  UTXO shielded → transação privada, sem link on-chain      │
 └────────────────────────────────────────────────────────────┘
 ```
 
@@ -110,9 +117,9 @@ Recebe as taxas de 0.5% de cada vault criado. Só o authority pode sacar.
 
 | Rota | Descrição | Status |
 |------|-----------|--------|
-| `/` | Landing — login Google/Apple via Privy | ✅ funcional |
+| `/` | Landing institucional — login Google/Apple via Privy | ✅ funcional |
 | `/wallet` | Dashboard — saldo SOL + atalhos | ✅ funcional (atividade mock) |
-| `/send` | Fluxo envio em 4 steps (handle → amount → confirm → success) | ✅ funcional |
+| `/send` | Fluxo de envio — 5 steps: handle → amount → privacy → confirm → success | ✅ funcional |
 | `/claim/[vaultId]` | Resgatar pagamento (crypto ou PIX) | ✅ funcional |
 | `/defi` | Estratégias DeFi (UI mockada) | ⚠️ UI apenas, sem integração real |
 | `/settings` | Perfil, carteira, logout | ✅ funcional |
@@ -121,7 +128,7 @@ Recebe as taxas de 0.5% de cada vault criado. Só o authority pode sacar.
 
 | Rota | Método | Descrição | Status |
 |------|--------|-----------|--------|
-| `/api/send` | POST | Monta `CreateSolVault` tx para o cliente assinar | ✅ funcional |
+| `/api/send` | POST | Monta `CreateSolVault` tx; aceita flag `private` para modo Cloak | ⚠️ flag `private` pendente |
 | `/api/claim` | POST | Monta `ClaimSolVault/Spl` tx | ✅ funcional |
 | `/api/claim-pix` | POST | Monta claim tx + grava intenção PIX em memória | ⚠️ PIX em memória volátil |
 | `/api/vault/[vaultId]` | GET | Deserializa `PaymentVault` on-chain | ✅ funcional |
@@ -131,21 +138,129 @@ Recebe as taxas de 0.5% de cada vault criado. Só o authority pode sacar.
 
 ---
 
+## Cloak — Transações Privadas
+
+### O que é
+
+[Cloak](https://docs.cloak.ag) é uma camada de privacidade para Solana baseada em UTXOs shielded. Em vez de a transação aparecer diretamente no Solscan vinculando remetente e destinatário, o Cloak usa um relay intermediário que quebra esse link on-chain.
+
+### Custo Cloak
+
+```
+Taxa Cloak = 0.005 SOL (base) + 0.3% do valor bruto
+```
+
+Implementado em `app/src/lib/cloak.ts`:
+
+```typescript
+export const CLOAK_BASE_FEE_LAMPORTS = 5_000_000n;  // 0.005 SOL
+
+export function calculateCloakFeeLamports(grossLamports: bigint): bigint {
+  return CLOAK_BASE_FEE_LAMPORTS + (grossLamports * 3n) / 1000n;
+}
+```
+
+### Fluxo no Frontend (Implementado)
+
+O `send/page.tsx` agora tem 5 steps:
+
+```
+handle → amount → [NOVO] privacy → confirm → success
+```
+
+Step 3 (privacy) apresenta duas opções:
+- **Público** (sem taxa extra) — transação visível no Solscan
+- **Privado via Cloak** — relay shielded, taxa = 0.005 SOL + 0.3%
+
+O confirm mostra a taxa Cloak como linha separada destacada em roxo quando o modo privado está selecionado.
+
+### Integração Backend (PENDENTE)
+
+O `/api/send/route.ts` ainda não processa a flag `private`. O que precisa ser feito:
+
+**1. Aceitar flag no body:**
+```typescript
+const { sender, platform, handle, amountSol, private: isPrivate } = await req.json();
+```
+
+**2. Calcular e retornar Cloak fee:**
+```typescript
+import { calculateCloakFeeLamports } from "@/lib/cloak";
+
+const grossLamports = BigInt(Math.round(amountSol * LAMPORTS_PER_SOL));
+const cloakFeeLamports = isPrivate ? calculateCloakFeeLamports(grossLamports) : 0n;
+
+return NextResponse.json({
+  transaction,
+  vault: vaultAddress,
+  cloakFee: cloakFeeLamports.toString(),  // bigint → string para JSON
+});
+```
+
+**3. Routing Cloak via SDK:**
+
+A chamada real ao Cloak relay requer o SDK oficial. Consultar `docs.cloak.ag/sdk/quickstart` para obter o pacote e token de acesso. O padrão é:
+
+```typescript
+import { CloakClient } from "@cloak-labs/sdk";
+
+const cloak = new CloakClient({
+  programId: "zh1eLd6rSphLejbFfJEneUwzHRfMKxgzrgkfwA6qRkW",
+  relay: "https://api.cloak.ag",
+  connection,
+});
+
+// Substitui o vault normal por um depósito shielded
+const { txHash } = await cloak.transact({
+  sender: senderPublicKey,
+  recipient: recipientAddress,
+  amount: grossLamports,
+});
+```
+
+**Nota:** O SDK Cloak pode não estar no npm público. Verificar documentação para o registro privado ou endpoint de instalação.
+
+### Variáveis de Ambiente para Cloak
+
+```bash
+CLOAK_API_KEY=<obtido no dashboard Cloak>
+NEXT_PUBLIC_CLOAK_PROGRAM_ID=zh1eLd6rSphLejbFfJEneUwzHRfMKxgzrgkfwA6qRkW
+```
+
+---
+
 ## Fluxo Principal: Enviar Pagamento
+
+### Modo Público (padrão)
 
 ```
 1. Usuário digita @handle + plataforma
 2. Usuário digita valor (SOL)
-3. Confirma → POST /api/send {sender, platform, handle, amountSol}
-4. API:
+3. Seleciona modo: Público
+4. Confirma → POST /api/send {sender, platform, handle, amountSol, private: false}
+5. API:
    a. Lê nonce atual do sender na chain
    b. Computa hash SHA-256 do handle
    c. Monta instrução CreateSolVault
    d. Retorna tx serializada (não assinada) + endereço vault
-5. Frontend pede assinatura ao Privy embedded wallet
-6. Frontend submete tx assinada via RPC
-7. Aguarda confirmação
-8. Exibe link de claim: {APP_URL}/claim/{vault_address}
+6. Frontend pede assinatura ao Privy embedded wallet
+7. Frontend submete tx assinada via RPC
+8. Aguarda confirmação
+9. Exibe link de claim: {APP_URL}/claim/{vault_address}
+```
+
+### Modo Privado (Cloak)
+
+```
+1–3. Mesmo que acima, mas seleciona modo: Privado via Cloak
+4. Confirma → POST /api/send {sender, platform, handle, amountSol, private: true}
+5. API:
+   a. Calcula cloakFee = 0.005 SOL + 0.3% de amountSol
+   b. Encaminha depósito ao relay Cloak (sdk.transact)
+   c. Retorna {cloakTxHash, vault} — sem link Solscan público
+6. Frontend assina a transação Cloak via Privy
+7. Relay Cloak faz o roteamento shielded on-chain
+8. Link de claim gerado normalmente (vault ainda criado no programa)
 ```
 
 ---
@@ -195,6 +310,169 @@ O claimant deve ter o handle registrado no Registry com sua carteira Privy como 
 
 ---
 
+## Banco de Dados e Armazenamento
+
+### Visão Geral por Camada
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Solana On-Chain (fonte de verdade imutável)                │
+│  PaymentVault PDAs, HandleRecord PDAs, VaultConfig          │
+│  Não requer gerenciamento — é o "banco de dados" do protocolo│
+└────────────────────┬────────────────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────────────────┐
+│  Redis (Upstash) — dados efêmeros e cache                   │
+│  TTL 24h: PIX intent store (vaultNonce → pixKey + brlCents) │
+│  TTL 30s: cache de cotação SOL/BRL                          │
+│  Sem schema, sem migrations, sem ORM                        │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+┌────────────────────▼────────────────────────────────────────┐
+│  PostgreSQL (Supabase/Neon) — analytics e histórico         │
+│  Necessário a partir do dashboard de métricas               │
+│  Tabelas: events, vaults_snapshot, daily_stats              │
+│  Populado pelo webhook Helius (on-chain events → rows)      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### O que vai onde
+
+| Dado | Onde armazenar | Por quê |
+|------|---------------|---------|
+| Vault criado / claimed / expirado | On-chain (Solana) | Fonte de verdade imutável |
+| Handle → wallet | On-chain (Registry PDA) | Verificável publicamente |
+| Intenção PIX (pixKey + valor BRL) | Redis com TTL 24h | Efêmero, não precisa persistir |
+| Cotação SOL/BRL | Redis com TTL 30s | Cache para evitar rate limit |
+| Sessão de usuário | Privy (gerencia) | Não precisa implementar |
+| Métricas históricas (volume, counts) | PostgreSQL | Queries analíticas; on-chain é lento para isso |
+| Eventos on-chain parseados | PostgreSQL | Indexar e servir ao dashboard |
+| Chaves de API, secrets | Variáveis de ambiente | Nunca em banco de dados |
+
+### Redis (Upstash) — Detalhes
+
+**Uso atual:**
+```typescript
+// PIX intent store — necessário para correlacionar claim com PIX
+pix:{vaultNonce}  →  { pixKey, brlCents, walletAddress }   TTL: 24h
+
+// Price cache — evitar 429 na Binance
+price:sol_brl     →  "1234.56"                             TTL: 30s
+```
+
+**Setup Upstash (free tier: 10k req/dia):**
+```
+upstash.com → Create Database → Region: us-east-1
+→ REST API → copiar UPSTASH_REDIS_REST_URL e UPSTASH_REDIS_REST_TOKEN
+```
+
+**No Vercel:** instalar via Marketplace Integration (injeta as vars automaticamente).
+**No Railway:** adicionar via New → Database → Redis (injeta `REDIS_URL`).
+
+### PostgreSQL — Detalhes (para dashboard de métricas)
+
+**Schema mínimo para MVP do dashboard:**
+
+```sql
+-- Cada evento on-chain parseado pelo webhook Helius
+CREATE TABLE events (
+  id            BIGSERIAL PRIMARY KEY,
+  event_type    TEXT NOT NULL,           -- 'vault_created' | 'vault_claimed' | 'vault_refunded'
+  vault_address TEXT NOT NULL,
+  sender        TEXT,
+  amount_lamports BIGINT,
+  platform      SMALLINT,               -- 0=Instagram 1=Twitter 2=WhatsApp
+  is_private    BOOLEAN DEFAULT false,  -- Cloak
+  tx_signature  TEXT,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Snapshot diário para gráficos sem re-agregar tudo
+CREATE TABLE daily_stats (
+  date          DATE PRIMARY KEY,
+  vaults_created  INT DEFAULT 0,
+  vaults_claimed  INT DEFAULT 0,
+  vaults_expired  INT DEFAULT 0,
+  volume_lamports BIGINT DEFAULT 0,
+  unique_senders  INT DEFAULT 0
+);
+
+CREATE INDEX idx_events_type ON events(event_type);
+CREATE INDEX idx_events_created ON events(created_at DESC);
+```
+
+**Providers recomendados (free tier):**
+
+| Provider | Free tier | Melhor para |
+|----------|-----------|-------------|
+| **Supabase** | 500MB, 2 projetos | Auth, realtime, REST auto-gerado |
+| **Neon** | 512MB, branching | Serverless-first, Vercel Edge |
+| **PlanetScale** | 5GB, 1 DB | MySQL, schema branching |
+
+Recomendação: **Neon** para Vercel (integração nativa, edge-compatible driver `@neondatabase/serverless`).
+
+**Variáveis:**
+```bash
+DATABASE_URL=postgresql://user:pass@host/db?sslmode=require
+# Neon/Supabase injetam isso automaticamente via integração Vercel
+```
+
+---
+
+## Serviços Necessários
+
+### Mapa de Serviços
+
+```
+┌──────────────┬──────────────────────────────┬───────────┬────────────────┐
+│ Serviço      │ Função                       │ Free tier │ Env var        │
+├──────────────┼──────────────────────────────┼───────────┼────────────────┤
+│ Privy        │ Auth social + embedded wallet│ Sim       │ PRIVY_APP_ID   │
+│ Helius       │ RPC Solana + webhooks        │ Sim (500k)│ HELIUS_API_KEY │
+│ Railway      │ Hosting (ou Vercel)          │ $5/mês    │ —              │
+│ Vercel       │ Hosting (ou Railway)         │ Sim       │ —              │
+│ Upstash      │ Redis (PIX store, cache)     │ Sim (10k) │ UPSTASH_*      │
+│ Neon/Supabase│ PostgreSQL (dashboard/analytics)│ Sim   │ DATABASE_URL   │
+│ Cloak        │ Transações privadas          │ Não       │ CLOAK_API_KEY  │
+│ OpenPix/Woovi│ Despacho PIX                 │ Não       │ OPENPIX_APP_ID │
+│ Jupiter      │ Swap SOL↔USDC                │ Gratuito  │ —              │
+│ Binance API  │ Cotação SOL/USD              │ Gratuito  │ —              │
+│ ExchangeRate │ Cotação USD/BRL              │ Sim (1500/mês)│ —          │
+└──────────────┴──────────────────────────────┴───────────┴────────────────┘
+```
+
+### Serviços Obrigatórios para MVP
+
+1. **Privy** — sem ele não há auth nem embedded wallet. Gratuito até 1.000 usuários ativos/mês.
+   - Criar app: `dashboard.privy.io`
+
+2. **Helius** — RPC com rate limits muito maiores que o devnet público. Gratuito até 500k req/mês.
+   - Criar conta: `dashboard.helius.xyz`
+   - Usar o endpoint: `https://devnet.helius-rpc.com/?api-key=<KEY>`
+
+3. **Railway ou Vercel** — hosting do Next.js.
+   - Railway: melhor para manter estado entre requests (Redis service integrado, sem cold start)
+   - Vercel: melhor integração com Next.js, CDN global, mas serverless (sem estado em memória)
+
+4. **Upstash Redis** — para o PIX store persistir entre deploys/restarts.
+   - Criar em: `upstash.com` ou via Vercel Marketplace
+
+### Serviços para o Dashboard de Métricas
+
+5. **Neon ou Supabase** — PostgreSQL para armazenar eventos on-chain e gerar métricas.
+   - Neon: `neon.tech` (melhor para Vercel Edge)
+   - Supabase: `supabase.com` (tem realtime built-in se quiser live dashboard)
+
+### Serviços Futuros (não bloqueadores do MVP)
+
+6. **OpenPix/Woovi** — despacho PIX. Requer CNPJ e conta verificada.
+   - Criar conta: `openpix.com.br`
+
+7. **Cloak** — privacidade nas transações. SDK ainda não público no npm.
+   - Contato: `docs.cloak.ag` → obter acesso ao SDK
+
+---
+
 ## Integrations
 
 | Serviço | Uso | Config |
@@ -202,6 +480,9 @@ O claimant deve ter o handle registrado no Registry com sua carteira Privy como 
 | **Privy** | Auth social (Google/Apple/Twitter) + embedded wallet Solana | `NEXT_PUBLIC_PRIVY_APP_ID` |
 | **Helius RPC** | RPC devnet (rate limits altos) + webhooks de eventos | `NEXT_PUBLIC_RPC_ENDPOINT`, `HELIUS_API_KEY` |
 | **Jupiter** | Proxy para quotes e swaps SOL↔USDC (futuro PIX) | sem chave — API pública |
+| **Cloak** | Relay shielded para transações privadas | `CLOAK_API_KEY` (obter no dashboard Cloak) |
+| **Upstash Redis** | PIX store persistente + cache de preços | `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` |
+| **Neon/Supabase** | PostgreSQL para analytics e dashboard de métricas | `DATABASE_URL` |
 | **OpenPix/Woovi** | Despachar PIX após claim | `OPENPIX_APP_ID` (pendente) |
 | **Binance + ExchangeRate** | Cotação SOL/USD e USD/BRL | sem chave — API pública |
 
@@ -282,12 +563,13 @@ app/src/app/api/auth/instagram/
 - **Security**: C-1 (open claim) corrigido — HandleRecord PDA + destination_wallet verificados on-chain
 
 ### ✅ Frontend
-- Landing page (login Privy)
+- Landing page institucional (full-width, Framer Motion, glassmorphism)
 - Wallet dashboard (saldo via RPC, preço SOL)
 - Navegação por abas
 - Página de settings (perfil, carteira, logout)
 - DeFi page (UI de estratégias — sem integração real)
 - Claim page — leitura de vault on-chain, validação de hash client-side
+- Send page — fluxo de 5 steps com privacy step (público / Cloak)
 
 ### ✅ Build
 - `next build` passa sem erros
@@ -296,7 +578,7 @@ app/src/app/api/auth/instagram/
 
 ---
 
-## Próximos Passos Detalhados
+## Próximos Passos para Ir Live
 
 ### 🔴 P0 — Bloqueia o fluxo principal (fazer primeiro)
 
@@ -373,11 +655,49 @@ PRIVY_APP_SECRET=<do dashboard Privy → API Keys>
 
 ---
 
+#### 4. Completar integração Cloak no backend
+
+O frontend já tem o step de privacy e envia `private: true` na requisição. Falta o `/api/send/route.ts` processar a flag.
+
+**O que fazer:**
+
+a) Instalar o SDK Cloak:
+```bash
+# Verificar docs.cloak.ag/sdk/quickstart para o pacote exato
+# Pode ser npm privado; obter token no dashboard Cloak
+npm install @cloak-labs/sdk
+# ou
+npm install https://registry.cloak.ag/...
+```
+
+b) Atualizar `/api/send/route.ts` para aceitar e processar `private`:
+```typescript
+import { calculateCloakFeeLamports, CLOAK_PROGRAM_ID } from "@/lib/cloak";
+
+const { sender, platform, handle, amountSol, private: isPrivate } = await req.json();
+
+const grossLamports = BigInt(Math.round(amountSol * LAMPORTS_PER_SOL));
+const cloakFeeLamports = isPrivate ? calculateCloakFeeLamports(grossLamports) : 0n;
+
+// ... monta tx normal ...
+
+return NextResponse.json({
+  transaction,
+  vault: vaultAddress,
+  cloakFee: cloakFeeLamports.toString(),
+  isPrivate,
+});
+```
+
+c) Para o relay shielded real, consultar `docs.cloak.ag/sdk/transact`.
+
+---
+
 ### 🟡 P1 — Necessário para deploy funcional
 
 ---
 
-#### 4. Configurar Helius Webhook
+#### 5. Configurar Helius Webhook
 
 O webhook aciona o fluxo PIX quando um vault é claimed.
 
@@ -394,14 +714,13 @@ O webhook aciona o fluxo PIX quando um vault é claimed.
 
 ---
 
-#### 5. Migrar pix-store.ts para Redis
+#### 6. Migrar pix-store.ts para Redis
 
 `pix-store.ts` usa `Map` em memória — perde tudo ao reiniciar ou em serverless.
 
 **Com Upstash Redis (Vercel) ou Railway Redis:**
 
 ```bash
-# Instalar
 npm install @upstash/redis
 ```
 
@@ -438,7 +757,218 @@ REDIS_URL=redis://...
 
 ---
 
-#### 6. Buscar histórico real no /wallet
+#### 7. Dashboard de Métricas do dApp
+
+Um painel `/admin` para acompanhar o uso do protocolo em tempo real.
+
+**Stack recomendada:** Next.js page `/app/(admin)/admin/page.tsx` + PostgreSQL (Neon/Supabase) populado pelo webhook Helius.
+
+##### Passo 1 — Criar banco PostgreSQL
+
+```bash
+# Neon (recomendado para Vercel)
+# neon.tech → New Project → copiar DATABASE_URL
+npm install @neondatabase/serverless
+
+# ou Supabase
+# supabase.com → New Project → Settings → Database → Connection string
+npm install @supabase/supabase-js
+```
+
+Criar as tabelas (rodar via SQL editor do Neon/Supabase):
+
+```sql
+CREATE TABLE events (
+  id              BIGSERIAL PRIMARY KEY,
+  event_type      TEXT NOT NULL,
+  vault_address   TEXT NOT NULL,
+  sender          TEXT,
+  amount_lamports BIGINT,
+  platform        SMALLINT,
+  is_private      BOOLEAN DEFAULT false,
+  tx_signature    TEXT UNIQUE,
+  created_at      TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE daily_stats (
+  date              DATE PRIMARY KEY,
+  vaults_created    INT DEFAULT 0,
+  vaults_claimed    INT DEFAULT 0,
+  vaults_expired    INT DEFAULT 0,
+  volume_lamports   BIGINT DEFAULT 0,
+  unique_senders    INT DEFAULT 0
+);
+
+CREATE INDEX idx_events_type    ON events(event_type);
+CREATE INDEX idx_events_created ON events(created_at DESC);
+```
+
+##### Passo 2 — Alimentar banco via webhook Helius
+
+Atualizar `/api/webhooks/helius/route.ts` para inserir eventos ao receber callbacks:
+
+```typescript
+import { neon } from "@neondatabase/serverless";
+
+const sql = neon(process.env.DATABASE_URL!);
+
+// Dentro do handler, após identificar o tipo de evento:
+await sql`
+  INSERT INTO events (event_type, vault_address, sender, amount_lamports, platform, tx_signature)
+  VALUES (${eventType}, ${vaultAddress}, ${sender}, ${amountLamports}, ${platform}, ${txSignature})
+  ON CONFLICT (tx_signature) DO NOTHING
+`;
+
+// Atualizar daily_stats
+await sql`
+  INSERT INTO daily_stats (date, vaults_created, volume_lamports)
+  VALUES (CURRENT_DATE, 1, ${amountLamports})
+  ON CONFLICT (date) DO UPDATE SET
+    vaults_created  = daily_stats.vaults_created + 1,
+    volume_lamports = daily_stats.volume_lamports + EXCLUDED.volume_lamports
+`;
+```
+
+##### Passo 3 — Criar API route de métricas
+
+```typescript
+// app/src/app/api/admin/metrics/route.ts
+import { neon } from "@neondatabase/serverless";
+import { NextResponse } from "next/server";
+
+const sql = neon(process.env.DATABASE_URL!);
+
+export async function GET() {
+  const [totals] = await sql`
+    SELECT
+      COUNT(*) FILTER (WHERE event_type = 'vault_created')  AS total_created,
+      COUNT(*) FILTER (WHERE event_type = 'vault_claimed')  AS total_claimed,
+      COUNT(*) FILTER (WHERE event_type = 'vault_expired')  AS total_expired,
+      COALESCE(SUM(amount_lamports) FILTER (WHERE event_type = 'vault_created'), 0) AS total_volume,
+      COUNT(DISTINCT sender) AS unique_senders,
+      COUNT(*) FILTER (WHERE is_private = true) AS private_sends
+    FROM events
+  `;
+
+  const last30days = await sql`
+    SELECT date, vaults_created, vaults_claimed, volume_lamports
+    FROM daily_stats
+    WHERE date >= CURRENT_DATE - INTERVAL '30 days'
+    ORDER BY date ASC
+  `;
+
+  const byPlatform = await sql`
+    SELECT platform, COUNT(*) AS count
+    FROM events
+    WHERE event_type = 'vault_created'
+    GROUP BY platform
+  `;
+
+  return NextResponse.json({ totals, last30days, byPlatform });
+}
+```
+
+##### Passo 4 — Criar página `/admin`
+
+```typescript
+// app/src/app/(admin)/admin/page.tsx
+// Proteger com senha simples ou Privy (verificar ADMIN_SECRET no header)
+// Exibir:
+//   - Cards: Total enviado | Total resgatado | Volume SOL | Senders únicos
+//   - Gráfico de linha: volume diário (últimos 30 dias)
+//   - Pizza: distribuição por plataforma (Instagram / Twitter / WhatsApp)
+//   - Lista: últimos 10 eventos (vault, valor, hora)
+//   - Badge: % privado (Cloak) vs público
+```
+
+**Bibliotecas para os gráficos:**
+```bash
+npm install recharts
+# ou
+npm install @tremor/react   # componentes prontos para dashboards Next.js
+```
+
+**Exemplo com Tremor (zero config):**
+```typescript
+import { Card, Metric, Text, AreaChart, DonutChart } from "@tremor/react";
+
+export default async function AdminPage() {
+  const { totals, last30days, byPlatform } = await fetch('/api/admin/metrics').then(r => r.json());
+
+  return (
+    <div className="p-8 space-y-6">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <Card>
+          <Text>Vaults Criados</Text>
+          <Metric>{totals.total_created}</Metric>
+        </Card>
+        <Card>
+          <Text>Vaults Resgatados</Text>
+          <Metric>{totals.total_claimed}</Metric>
+        </Card>
+        <Card>
+          <Text>Volume Total (SOL)</Text>
+          <Metric>{(Number(totals.total_volume) / 1e9).toFixed(2)}</Metric>
+        </Card>
+        <Card>
+          <Text>Senders Únicos</Text>
+          <Metric>{totals.unique_senders}</Metric>
+        </Card>
+      </div>
+
+      <Card>
+        <Text>Volume Diário — últimos 30 dias</Text>
+        <AreaChart
+          data={last30days}
+          index="date"
+          categories={["volume_lamports"]}
+          colors={["purple"]}
+        />
+      </Card>
+
+      <Card>
+        <Text>Distribuição por Plataforma</Text>
+        <DonutChart
+          data={byPlatform}
+          category="count"
+          index="platform"
+        />
+      </Card>
+    </div>
+  );
+}
+```
+
+**Proteção da rota `/admin`:**
+```typescript
+// middleware.ts
+import { NextRequest, NextResponse } from "next/server";
+
+export function middleware(req: NextRequest) {
+  if (req.nextUrl.pathname.startsWith("/admin")) {
+    const token = req.headers.get("x-admin-token") ?? req.cookies.get("admin_token")?.value;
+    if (token !== process.env.ADMIN_SECRET) {
+      return NextResponse.redirect(new URL("/", req.url));
+    }
+  }
+  return NextResponse.next();
+}
+```
+
+```bash
+# Variável de ambiente
+ADMIN_SECRET=<string aleatória longa>
+```
+
+**Variáveis de ambiente adicionais para o dashboard:**
+```bash
+DATABASE_URL=postgresql://...   # Neon ou Supabase
+ADMIN_SECRET=<token de acesso ao /admin>
+```
+
+---
+
+#### 8. Buscar histórico real no /wallet
 
 A tela de wallet mostra dados mock. Substituir por:
 
@@ -460,7 +990,7 @@ Filtrar por `type: "TRANSFER"` e `source: "SYSTEM_PROGRAM"` para mostrar envios/
 
 ---
 
-#### 7. Fechar vault PDAs após claim/refund (L-2)
+#### 8. Fechar vault PDAs após claim/refund (L-2)
 
 Cada vault aberto custa ~0.002 SOL em rent. Adicionar `close = sender` ao account constraint:
 
@@ -476,7 +1006,7 @@ pub vault: Account<'info, PaymentVault>,
 
 ---
 
-#### 8. Whitelist de mints em CreateSplVault (M-1)
+#### 9. Whitelist de mints em CreateSplVault (M-1)
 
 Atualmente aceita qualquer mint SPL. Adicionar validação:
 
@@ -493,7 +1023,7 @@ require!(
 
 ---
 
-#### 9. Instagram OAuth — Meta Graph API
+#### 10. Instagram OAuth — Meta Graph API
 
 **Configuração:**
 1. `developers.facebook.com` → Create App → Consumer
@@ -516,26 +1046,27 @@ META_REDIRECT_URI=https://<APP_URL>/api/auth/instagram/callback
 - `output: 'standalone'` já está em `next.config.mjs` ✅
 - Repositório no GitHub
 
-### Passos
+### Passos Completos
 
 **1. Criar projeto no Railway**
 ```
 railway.app → New Project → Deploy from GitHub Repo
+Selecionar o repositório → selecionar branch main
 ```
 
 **2. Configurar serviço Next.js**
 - Root Directory: `pay-on-handle/app`
 - Build Command: `npm run build`
 - Start Command: `node .next/standalone/server.js`
-- Ou usar Dockerfile abaixo
+- Port: `3000`
 
 **3. Adicionar serviço Redis**
 ```
-New → Database → Add Redis
+No projeto Railway → New → Database → Add Redis
 ```
 Railway injeta `REDIS_URL` automaticamente no serviço Next.js.
 
-**4. Criar `app/Dockerfile`** (opcional, mais controle)
+**4. Criar `app/Dockerfile`** (opcional — mais controle sobre o build)
 ```dockerfile
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -555,39 +1086,67 @@ EXPOSE 3000
 CMD ["node", "server.js"]
 ```
 
-**5. Variáveis de ambiente** (Railway → Variables tab)
+**5. Variáveis de ambiente** (Railway → seu serviço → Variables tab)
+
 ```bash
+# Públicas (expostas ao browser)
 NEXT_PUBLIC_PRIVY_APP_ID=cmo0pavcd00860cjp0engxymy
 NEXT_PUBLIC_RPC_ENDPOINT=https://devnet.helius-rpc.com/?api-key=e657af06-55cf-4b04-bb72-09909232d6c4
 NEXT_PUBLIC_VAULT_PROGRAM_ID=EgS854XfeyTkuTKpYzDD3h5kiKMt4h3J37hGaBfuDN4H
 NEXT_PUBLIC_REGISTRY_PROGRAM_ID=AT8S64nJohSwwAv4BxfvAxwaWaVnfFvfsVXVjA8DZkvX
 NEXT_PUBLIC_FEE_COLLECTOR_PROGRAM_ID=CxMBNwbovsvLTe7bSuca8X26WS7PW81VtDu3oLyfSG6s
 NEXT_PUBLIC_APP_URL=https://pay-on-handle-production-70a5.up.railway.app
+
+# Secretas (nunca expor ao browser)
 RELAYER_PRIVATE_KEY=<bs58 — NÃO commitar>
-PRIVY_APP_SECRET=<do dashboard Privy>
+PRIVY_APP_SECRET=<do dashboard Privy → API Keys>
 HELIUS_API_KEY=e657af06-55cf-4b04-bb72-09909232d6c4
 HELIUS_WEBHOOK_SECRET=<gerar no dashboard Helius>
+CLOAK_API_KEY=<dashboard Cloak>
 OPENPIX_APP_ID=<Woovi — pendente>
 # REDIS_URL é injetado automaticamente pelo Railway Redis
 ```
 
-**6. Domínio customizado** (opcional)
-- Railway → Settings → Domains → Add Custom Domain
-- Atualizar `NEXT_PUBLIC_APP_URL` e `META_REDIRECT_URI`
+**6. Gerar keypair do relayer**
+```bash
+# Gerar nova keypair (NÃO usar a keypair de deploy dos programas)
+solana-keygen new --outfile relayer-keypair.json
+solana airdrop 1 $(solana-keygen pubkey relayer-keypair.json) --url devnet
+
+# Exportar em base58 para a variável de ambiente
+node -e "
+  const fs = require('fs');
+  const bs58 = require('bs58');
+  const key = JSON.parse(fs.readFileSync('relayer-keypair.json'));
+  console.log(bs58.encode(Buffer.from(key)));
+"
+```
+
+**7. Domínio customizado** (opcional)
+```
+Railway → Settings → Domains → Add Custom Domain
+```
+Após configurar domínio, atualizar `NEXT_PUBLIC_APP_URL` e recriar o Helius webhook com a nova URL.
+
+**8. Verificar build no Railway**
+```
+Railway → seu serviço → Deployments → ver logs do build
+Erros comuns: falta de env var, versão do Node incompatível
+```
 
 ---
 
 ## Deploy: Vercel
 
 ### Pré-requisitos
-- `output: 'standalone'` já está configurado ✅
 - Repositório no GitHub
+- Monorepo — configurar Root Directory corretamente
 
-### Passos
+### Passos Completos
 
 **1. Importar projeto**
 ```
-vercel.com/new → Import Git Repository
+vercel.com/new → Import Git Repository → selecionar o repo
 ```
 
 **2. Configurar projeto**
@@ -595,12 +1154,15 @@ vercel.com/new → Import Git Repository
 - Root Directory: `pay-on-handle/app`
 - Build Command: `npm run build` (padrão)
 - Output Directory: `.next` (padrão)
+- Node.js Version: 20.x
 
-**3. Adicionar integrações (Vercel Dashboard → Integrations)**
-- **Upstash Redis** — para pix-store persistente
-  - Vercel Marketplace → Upstash → Connect → cria banco e injeta env vars automaticamente:
-    - `UPSTASH_REDIS_REST_URL`
-    - `UPSTASH_REDIS_REST_TOKEN`
+**3. Adicionar Upstash Redis (obrigatório para PIX store)**
+```
+Vercel Dashboard → Integrations → Upstash → Add Integration
+```
+Isso cria o banco e injeta automaticamente:
+- `UPSTASH_REDIS_REST_URL`
+- `UPSTASH_REDIS_REST_TOKEN`
 
 **4. Variáveis de ambiente** (Project → Settings → Environment Variables)
 
@@ -616,42 +1178,78 @@ vercel.com/new → Import Git Repository
 | `PRIVY_APP_SECRET` | Secret | `<do dashboard Privy>` |
 | `HELIUS_API_KEY` | Secret | `e657af06-55cf-4b04-bb72-09909232d6c4` |
 | `HELIUS_WEBHOOK_SECRET` | Secret | `<gerar no Helius>` |
+| `CLOAK_API_KEY` | Secret | `<dashboard Cloak>` |
 | `OPENPIX_APP_ID` | Secret | `<Woovi — pendente>` |
 
-**5. Deploy**
+**5. Deploy via CLI**
 ```bash
-# Via CLI
 npm i -g vercel
 cd pay-on-handle/app
 vercel --prod
-
-# Ou push para o branch main — Vercel auto-deploya
 ```
 
-**6. Atualizar Helius webhook URL** após deploy:
+Ou simplesmente fazer push para `main` — Vercel auto-deploya.
+
+**6. Após o deploy:**
 ```
-Dashboard Helius → seu webhook → URL: https://pay-on-handle.vercel.app/api/webhooks/helius
+1. Copiar a URL final (ex: pay-on-handle.vercel.app)
+2. Atualizar NEXT_PUBLIC_APP_URL para essa URL
+3. Recriar Helius webhook: Dashboard → Webhooks → URL nova
+4. Atualizar META_REDIRECT_URI se Instagram OAuth estiver ativo
 ```
 
-**Limitação importante:** Vercel serverless functions têm cold starts e são stateless. O `pix-store.ts` com `Map` em memória **não funciona** — a integração Upstash Redis (passo 3) é obrigatória antes de ativar o fluxo PIX.
+**Limitação Vercel:** Serverless functions são stateless — o `pix-store.ts` com `Map` em memória **não funciona**. Upstash Redis (passo 3) é obrigatório antes de ativar o fluxo PIX.
 
 ---
 
-## Checklist de Deploy (ordem de execução)
+## Checklist de Deploy — Ordem de Execução
 
+### Infraestrutura e Serviços (fazer antes do deploy)
 ```
-[ ] 1. anchor build && anchor test (programas passando)
-[ ] 2. Verificar/inicializar VaultConfig no devnet (script migrate)
-[ ] 3. npm run build no /app (zero erros TypeScript)
-[ ] 4. Configurar variáveis de ambiente no Railway ou Vercel
-[ ] 5. Ativar Twitter OAuth no dashboard Privy
-[ ] 6. Criar RELAYER_PRIVATE_KEY (solana-keygen new) e fazer airdrop devnet
-[ ] 7. Deploy Railway ou Vercel
-[ ] 8. Atualizar NEXT_PUBLIC_APP_URL para o domínio final
-[ ] 9. Criar Helius webhook apontando para o domínio final
-[ ] 10. Adicionar HELIUS_WEBHOOK_SECRET ao env do deploy
-[ ] 11. (Opcional) Adicionar Upstash Redis para PIX store
-[ ] 12. Testar fluxo completo: send → claim → claim link acessível externamente
+[ ] 1.  Criar conta Helius → obter HELIUS_API_KEY (helius.xyz)
+[ ] 2.  Criar conta Privy → obter NEXT_PUBLIC_PRIVY_APP_ID (privy.io)
+[ ] 3.  Criar banco Upstash Redis → obter UPSTASH_REDIS_REST_URL + TOKEN (upstash.com)
+[ ] 4.  Criar banco Neon ou Supabase PostgreSQL → obter DATABASE_URL
+[ ] 5.  Rodar migrations SQL no banco (tabelas events e daily_stats)
+[ ] 6.  Gerar RELAYER_PRIVATE_KEY (solana-keygen new) e fazer airdrop devnet
+[ ] 7.  Gerar ADMIN_SECRET (string aleatória para proteger /admin)
+```
+
+### Programas Solana
+```
+[ ] 8.  anchor build && anchor test (todos os testes passando)
+[ ] 9.  Verificar/inicializar VaultConfig no devnet (anchor run initialize)
+```
+
+### Build e Deploy
+```
+[ ] 10. npm run build em pay-on-handle/app (zero erros TypeScript)
+[ ] 11. Configurar todas as variáveis de ambiente no Railway ou Vercel
+[ ] 12. Deploy Railway ou Vercel
+[ ] 13. Atualizar NEXT_PUBLIC_APP_URL para o domínio final
+```
+
+### Configurações pós-deploy
+```
+[ ] 14. Criar Helius webhook apontando para https://<dominio>/api/webhooks/helius
+[ ] 15. Adicionar HELIUS_WEBHOOK_SECRET ao env do deploy
+[ ] 16. Ativar Twitter OAuth no dashboard Privy + criar Twitter App
+```
+
+### Funcionalidades pendentes (antes de abrir para usuários)
+```
+[ ] 17. Implementar /api/register-handle (sem isso, claim não funciona)
+[ ] 18. Atualizar /api/webhooks/helius para inserir eventos no PostgreSQL
+[ ] 19. Criar /api/admin/metrics com queries no PostgreSQL
+[ ] 20. Criar página /admin com cards + gráficos (Tremor ou Recharts)
+[ ] 21. (Cloak) Obter SDK e CLOAK_API_KEY → atualizar /api/send/route.ts
+```
+
+### Validação final
+```
+[ ] 22. Testar fluxo completo: send → link de claim → claim (devnet)
+[ ] 23. Abrir /admin e confirmar que métricas aparecem após o teste
+[ ] 24. Testar claim via link externo (não localhost)
 ```
 
 ---
@@ -666,3 +1264,4 @@ Dashboard Helius → seu webhook → URL: https://pay-on-handle.vercel.app/api/w
 | vaultId como BigInt | `send/page.tsx` | Vault address é base58 string, não número |
 | APP_URL sem protocolo | `.env.local` | Adicionado `https://` |
 | HELIUS_API_KEY com URL | `.env.local` | Extraída só a chave `e657af06...` |
+| Layout mobile invadindo landing | `app/layout.tsx` | Criado route group `(app)/layout.tsx` — landing é full-width |
