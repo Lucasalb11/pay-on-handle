@@ -28,6 +28,14 @@ type ClaimPixBody = {
 };
 
 export async function POST(req: NextRequest) {
+  // The current vault program pays the claim to the user's own wallet, so a PIX payout on top
+  // would pay twice. Keep this off until claims can be routed to the treasury.
+  if (process.env.PIX_PAYOUTS_ENABLED !== "true") {
+    return NextResponse.json(
+      { error: "PIX withdrawals are disabled in this demo. Claim to your wallet instead." },
+      { status: 503 }
+    );
+  }
   let body: ClaimPixBody;
   try {
     body = await req.json();

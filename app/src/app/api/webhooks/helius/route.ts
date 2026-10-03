@@ -1,4 +1,6 @@
+import { timingSafeEqual } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
+import { PublicKey } from "@solana/web3.js";
 import { getPixIntent, deletePixIntent } from "@/lib/pix-store";
 
 // Helius enhanced transaction webhook payload (simplified)
@@ -225,11 +227,22 @@ async function dispatchPix(
 }
 
 // POST — Helius calls this when a vault program transaction is confirmed
+/** Hex of the treasury that must receive a claim before PIX is paid, or null if payouts are off. */
+function pixTreasuryHex(): string | null {
+  if (process.env.PIX_PAYOUTS_ENABLED !== "true" || !process.env.PIX_TREASURY_WALLET) return null;
+  try {
+    return new PublicKey(process.env.PIX_TREASURY_WALLET).toBuffer().toString("hex");
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: NextRequest) {
   // Validate Helius webhook secret
-  const secret = req.headers.get("authorization");
-  const expected = process.env.HELIUS_WEBHOOK_SECRET;
-  if (expected && secret !== expected) {
+  // Fail closed: without a configured secret, anyone could post forged events.
+  const given = Buffer.from(req.headers.get("authorization") ?? "");
+  const expected = Buffer.from(process.env.HELIUS_WEBHOOK_SECRET ?? "");
+  if (!expected.length || given.length !== expected.length || !timingSafeEqual(given, expected)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -264,8 +277,10 @@ export async function POST(req: NextRequest) {
     );
 
     if (event.type === "VaultClaimed") {
-      const vaultNonce = (event.data as { vault_id?: string }).vault_id;
-      if (vaultNonce) {
+      const { vault_id: vaultNonce, claimer } = event.data as { vault_id?: string; claimer?: string };
+      // Paying PIX when the claimer kept the crypto would pay twice: only claims routed to
+      // the protocol treasury (which then sells the crypto) may trigger a PIX payout.
+      if (vaultNonce && claimer && claimer === pixTreasuryHex()) {
         getPixIntent(vaultNonce)
           .then((intent) => {
             if (!intent) return;

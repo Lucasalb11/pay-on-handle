@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { PublicKey } from "@solana/web3.js";
 
 const VAULT_PROGRAM_ID = "EgS854XfeyTkuTKpYzDD3h5kiKMt4h3J37hGaBfuDN4H";
 const LAMPORTS_PER_SOL = 1_000_000_000;
@@ -75,6 +76,11 @@ export async function GET(req: NextRequest) {
   const wallet = req.nextUrl.searchParams.get("wallet");
   if (!wallet) {
     return NextResponse.json({ error: "wallet required" }, { status: 400 });
+  }
+  try {
+    new PublicKey(wallet);
+  } catch {
+    return NextResponse.json({ error: "invalid wallet" }, { status: 400 });
   }
 
   const apiKey = process.env.HELIUS_API_KEY;
